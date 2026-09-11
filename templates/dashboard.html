@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% block title %}IoT Control Gateway{% endblock %}
+{% block head_scripts %}<script src="/static/dashboard.js"></script>{% endblock %}
+
+{% block content %}
+<div x-data="dashboard()" x-init="init()" x-cloak class="min-h-screen">
+
+  <!-- ── header ─────────────────────────────────────────────────────────── -->
+  <header class="sticky top-0 z-20 border-b border-[var(--line)] bg-[var(--bg)]/85 backdrop-blur-xl">
+    <!-- Narrow screens drop the status onto its own row (order-3 + w-full)
+         rather than truncating it; from sm up everything sits on one line. -->
+    <div class="mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-1 px-6 py-3 sm:h-16 sm:flex-nowrap sm:py-0">
+      <h1 class="order-1 whitespace-nowrap text-[15px] font-semibold tracking-tight">IoT Gateway</h1>
+
+      <!-- One line instead of three dots: say the single most useful thing. -->
+      <div class="order-3 flex w-full min-w-0 items-center gap-2 sm:order-2 sm:w-auto">
+        <span class="h-[6px] w-[6px] shrink-0 rounded-full"
+              :class="health.tone === 'on' ? 'bg-[var(--on)]'
+                    : health.tone === 'warn' ? 'bg-[var(--warn)] is-pending'
+                    : health.tone === 'danger' ? 'bg-[var(--danger)] is-pending'
+                    : 'bg-[var(--faint)]'"></span>
+        <span class="truncate text-[13px] text-[var(--muted)]" x-text="health.text"></span>
+      </div>
+
+      <div class="order-2 ml-auto flex shrink-0 items-center gap-4 sm:order-3">
+        <span class="hidden whitespace-nowrap text-[13px] text-[var(--faint)] sm:block">
+          <span class="text-[var(--muted)]" x-text="devices.length"></span> อุปกรณ์
+        </span>
+        <button @click="refresh()"
+                class="-mr-3 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] text-[var(--muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
+          สแกนใหม่
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-5xl px-6 pb-24 pt-10">
+
+    <!-- Empty state names the actual blocker: no server, no matter-server, or
+         a reachable matter-server with nothing commissioned yet. -->
+    <template x-if="devices.length === 0">
+      <div class="py-32 text-center text-[13px] leading-relaxed">
+        <p class="text-[var(--muted)]"
+           x-text="!socket ? 'ต่อเซิร์ฟเวอร์ไม่ได้'
+                 : !adapterConnected ? 'ยังต่อ ' + adapterName + ' ไม่ได้'
+                 : 'ยังไม่มีอุปกรณ์'"></p>
+        <p class="mt-1 text-[var(--faint)]"
+           x-text="!socket ? 'กำลังลองเชื่อมต่อใหม่อัตโนมัติ'
+                 : !adapterConnected ? 'ตรวจว่า matter-server รันอยู่ และ MATTER_WS_URL ชี้ถูกที่'
+                 : 'matter-server พร้อมแล้ว — commission Hub เข้า fabric ก่อน'"></p>
+      </div>
+    </template>
+
+    <template x-for="room in rooms" :key="room">
+      <section class="mb-12">
+
+        <div class="mb-4 flex items-baseline gap-3">
+          <h2 class="text-[13px] font-medium tracking-tight text-[var(--muted)]" x-text="room"></h2>
+          <span class="text-[12px] tabular-nums text-[var(--faint)]" x-text="byRoom(room).length"></span>
+          <span class="ml-1 h-px flex-1 bg-[var(--line)]"></span>
+        </div>
+
+        <div class="grid items-start gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <template x-for="device in byRoom(room)" :key="device.id">
+
+            <article class="tinted group rounded-2xl bg-[var(--surface)] p-5 ring-1 ring-white/[.05] transition-colors hover:bg-[var(--surface-hover)]"
+                     :class="device.online ? '' : 'opacity-45'"
+                     :style="cardTint(device)">
+
+              <!-- name -->
+              <div class="mb-4 flex items-start gap-2">
+                <h3 class="min-w-0 flex-1 truncate text-[14px] font-medium tracking-tight"
+                    :title="device.adapter + ' · ' + device.native_id"
+                    x-text="device.name"></h3>
+
+                <template x-if="!device.online">
+                  <span class="mt-[6px] h-[6px] w-[6px] shrink-0 rounded-full bg-[var(--faint)]"
+                        title="อุปกรณ์ออฟไลน์"></span>
+                </template>
+
+                <template x-if="historyEnabled">
+                  <button @click="openChart(device)" title="ดูกราฟย้อนหลัง"
+                          class="-mr-1 -mt-1 shrink-0 rounded-lg p-1.5 text-[var(--faint)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
+                    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <path d="M1.5 11.5 5 7.5l2.8 2.4L14.5 3.5" stroke="currentColor"
+                            stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </button>
+                </template>
+              </div>
+
+              <!-- hero readings -->
+              <template x-if="heroCaps(device).length">
+                <div class="mb-1 flex flex-wrap gap-x-9 gap-y-4">
+                  <template x-for="cap in heroCaps(device)" :key="cap">
+                    <div>
+                      <p class="text-[10px] uppercase tracking-[0.14em] text-[var(--faint)]"
+                         x-text="LABEL[cap] || cap"></p>
+                      <p class="mt-1.5 text-[30px] font-medium leading-none tracking-tight tabular-nums"
+                         :style="'color: ' + readingColor(device.id, cap)">
+                        <span x-text="format(device.id, cap)"></span><span
+                          class="ml-1 text-[14px] font-normal text-[var(--faint)]"
+                          x-text="unit(device.id, cap)"></span>
+                      </p>
+                    </div>
+                  </template>
+                </div>
+              </template>
+
+              <!-- switch -->
+              <template x-if="device.writable.includes('switch')">
+                <div class="mt-5 flex items-center justify-between gap-4">
+                  <span class="text-[13px] text-[var(--muted)]"
+                        x-text="statusLabel(device.id, 'switch')"></span>
+                  <button @click="toggle(device)" :disabled="!device.online"
+                          :aria-pressed="shown(device.id,'switch') ? 'true' : 'false'"
+                          class="relative h-6 w-11 shrink-0 rounded-full outline-none transition-colors focus-visible:ring-2 focus-visible:ring-white/25 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)] disabled:cursor-not-allowed"
+                          :class="[
+                            shown(device.id,'switch') ? 'bg-[var(--on)]' : 'bg-[var(--track)]',
+                            isPending(device.id,'switch') ? 'is-pending' : ''
+                          ]"
+                          :style="toggleStyle(device)">
+                    <span class="absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white shadow-sm transition-all duration-200"
+                          :class="shown(device.id,'switch') ? 'left-[23px]' : 'left-[3px]'"></span>
+                  </button>
+                </div>
+              </template>
+
+              <!-- sliders -->
+              <template x-for="cap in device.writable.filter(c => c !== 'switch')" :key="cap">
+                <div class="mt-4" :class="isPending(device.id, cap) ? 'is-pending' : ''">
+                  <div class="mb-1 flex items-baseline justify-between gap-3">
+                    <span class="text-[12px] text-[var(--faint)]" x-text="LABEL[cap] || cap"></span>
+                    <span class="text-[12px] tabular-nums text-[var(--muted)]">
+                      <span x-text="shown(device.id, cap) ?? '—'"></span><span x-text="UNIT[cap] || ''"></span>
+                    </span>
+                  </div>
+                  <input type="range" class="slider w-full"
+                         :min="RANGE[cap][0]" :max="RANGE[cap][1]" :step="RANGE[cap][2]"
+                         :disabled="!device.online"
+                         :value="shown(device.id, cap) ?? RANGE[cap][0]"
+                         :style="sliderStyle(device, cap)"
+                         :aria-label="LABEL[cap] || cap"
+                         @input="slide(device, cap, $event.target.value)">
+                </div>
+              </template>
+
+              <!-- secondary readings and staleness: shown only when they say
+                   something. A fresh sensor needs no timestamp. -->
+              <template x-if="footnote(device).length">
+                <div class="mt-5 flex flex-wrap items-center gap-x-4 gap-y-1">
+                  <template x-for="note in footnote(device)" :key="note.key">
+                    <span class="text-[11px]" :style="'color: ' + note.color"
+                          x-text="note.text"></span>
+                  </template>
+                </div>
+              </template>
+
+            </article>
+          </template>
+        </div>
+      </section>
+    </template>
+  </main>
+
+  <!-- ── history ────────────────────────────────────────────────────────── -->
+  <div x-show="chart.open" @keydown.escape.window="closeChart()"
+       class="fixed inset-0 z-40 flex items-end justify-center bg-black/60 p-0 backdrop-blur-sm sm:items-center sm:p-6">
+    <div @click.outside="closeChart()"
+         class="w-full max-w-3xl overflow-hidden rounded-t-3xl bg-[#141416] shadow-2xl sm:rounded-2xl">
+
+      <div class="flex items-start justify-between gap-4 px-6 pt-6">
+        <div class="min-w-0">
+          <h3 class="truncate text-[15px] font-medium tracking-tight" x-text="chart.device?.name"></h3>
+          <p class="mt-0.5 text-[12px] text-[var(--faint)]" x-text="chart.device?.room"></p>
+        </div>
+        <button @click="closeChart()" aria-label="ปิด"
+                class="-mr-2 -mt-1 rounded-lg p-2 text-[var(--faint)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="mt-5 flex flex-wrap items-center gap-x-1 gap-y-2 px-6">
+        <template x-for="cap in (chart.device?.capabilities || [])" :key="cap">
+          <button @click="pickCapability(cap)"
+                  class="rounded-full px-3 py-1 text-[12px] transition-colors"
+                  :class="chart.capability === cap
+                    ? 'bg-[var(--surface-hover)] text-[var(--text)]'
+                    : 'text-[var(--faint)] hover:text-[var(--muted)]'"
+                  x-text="LABEL[cap] || cap"></button>
+        </template>
+        <div class="ml-auto flex gap-1">
+          <template x-for="r in RANGES" :key="r.hours">
+            <button @click="pickRange(r.hours)"
+                    class="rounded-full px-2.5 py-1 text-[12px] tabular-nums transition-colors"
+                    :class="chart.hours === r.hours
+                      ? 'bg-[var(--surface-hover)] text-[var(--text)]'
+                      : 'text-[var(--faint)] hover:text-[var(--muted)]'"
+                    x-text="r.label"></button>
+          </template>
+        </div>
+      </div>
+
+      <div class="px-6 pb-6 pt-5">
+        <div class="relative h-64">
+          <canvas x-ref="canvas"></canvas>
+          <template x-if="chart.loading">
+            <div class="absolute inset-0 flex items-center justify-center text-[13px] text-[var(--faint)]">
+              กำลังโหลด…
+            </div>
+          </template>
+          <template x-if="!chart.loading && !chart.error && chart.data && chart.data.points.length === 0">
+            <div class="absolute inset-0 flex items-center justify-center text-[13px] text-[var(--faint)]">
+              ยังไม่มีข้อมูลในช่วงเวลานี้
+            </div>
+          </template>
+          <template x-if="chart.error">
+            <div class="absolute inset-0 flex items-center justify-center px-8 text-center text-[13px]"
+                 style="color: var(--danger)" x-text="chart.error"></div>
+          </template>
+        </div>
+
+        <div class="mt-6 flex flex-wrap items-end gap-x-10 gap-y-3 border-t border-[var(--line)] pt-5">
+          <template x-for="s in summary" :key="s.label">
+            <div>
+              <p class="text-[10px] uppercase tracking-[0.14em] text-[var(--faint)]" x-text="s.label"></p>
+              <p class="mt-1 text-[17px] font-medium tabular-nums"
+                 :style="'color: ' + s.color" x-text="s.value"></p>
+            </div>
+          </template>
+          <p class="ml-auto text-[11px] text-[var(--faint)]" x-text="chartSource"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── toasts ─────────────────────────────────────────────────────────── -->
+  <div class="pointer-events-none fixed inset-x-4 bottom-4 z-50 flex flex-col items-center gap-2 sm:inset-x-auto sm:right-6 sm:bottom-6 sm:items-end">
+    <template x-for="t in toasts" :key="t.id">
+      <div class="w-full max-w-sm rounded-xl bg-[#1a1a1d] px-4 py-3 shadow-xl ring-1 ring-white/[.06]">
+        <p class="text-[13px] font-medium"
+           :style="t.kind === 'error' ? 'color: var(--danger)' : 'color: var(--on)'"
+           x-text="t.title"></p>
+        <p class="mt-0.5 text-[12px] leading-snug text-[var(--muted)]" x-text="t.body"></p>
+      </div>
+    </template>
+  </div>
+</div>
+{% endblock %}

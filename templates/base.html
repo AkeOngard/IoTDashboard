@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a0b0e">
+  <title>{% block title %}IoT Control Gateway{% endblock %}</title>
+  <link rel="manifest" href="/static/manifest.json">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap"
+        rel="stylesheet">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="/static/api.js"></script>
+  {% block head_scripts %}{% endblock %}
+  <!-- Alpine is deferred, so it initialises after the page scripts above have
+       defined the component factories they register. -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+
+  <style>
+    /* One palette, one place. The UI is deliberately committed to a dark
+       surface -- it lives on a wall panel and a phone at night -- but every
+       colour is a token, so a light theme is a block of overrides, not a
+       rewrite of the markup. */
+    :root {
+      --bg:            #0a0b0e;
+      --surface:       rgba(255, 255, 255, .030);
+      --surface-hover: rgba(255, 255, 255, .055);
+      --line:          rgba(255, 255, 255, .07);
+      --text:          #eaeaee;
+      --muted:         #8d8d99;
+      --faint:         #5e5e6a;
+      --on:            #4bbd85;   /* device is on / everything healthy */
+      --warn:          #e0a94e;   /* hub reconnecting */
+      --danger:        #e2705f;   /* command failed, server unreachable */
+      --track:         rgba(255, 255, 255, .10);
+
+      /* Reading colours. These are not decoration: a value carries its own
+         colour, so "too hot" and "battery nearly flat" read before the number
+         does. app/static/dashboard.js interpolates between them. */
+      --c-cold:  #62a6e8;
+      --c-fresh: #45c4a6;
+      --c-good:  #7cc766;
+      --c-warm:  #e6b44f;
+      --c-hot:   #e56f5c;
+      --c-lux:   #edc95c;
+      --c-humid: #4fbde8;
+      --c-damp:  #8b8ff0;
+      --c-state: #a98bf5;
+    }
+
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      font-family: Inter, 'IBM Plex Sans Thai', system-ui, -apple-system, sans-serif;
+      font-feature-settings: 'cv05', 'ss01';
+      background: var(--bg);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+    }
+    [x-cloak] { display: none !important; }
+    ::selection { background: rgba(255, 255, 255, .16); }
+
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, .10);
+      border: 3px solid var(--bg);
+      border-radius: 999px;
+    }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, .18); }
+    ::-webkit-scrollbar-track { background: transparent; }
+
+    /* Sliders paint what they control: the brightness track fades up to the
+       lamp's current colour, and the colour-temperature track is an actual
+       Kelvin gradient -- so the control shows the outcome before you commit to
+       it. `--track-img` is set per input from dashboard.js. */
+    .slider { -webkit-appearance: none; appearance: none; background: transparent; height: 18px; cursor: pointer; }
+    .slider::-webkit-slider-runnable-track {
+      height: 4px; border-radius: 999px; background: var(--track-img, var(--track));
+    }
+    .slider::-moz-range-track {
+      height: 4px; border-radius: 999px; background: var(--track-img, var(--track));
+    }
+    .slider::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      margin-top: -5px; height: 14px; width: 14px; border-radius: 999px;
+      background: var(--text);
+      transition: transform .12s ease, box-shadow .12s ease;
+    }
+    .slider::-moz-range-thumb {
+      height: 14px; width: 14px; border: 0; border-radius: 999px; background: var(--text);
+      transition: transform .12s ease;
+    }
+    .slider:hover::-webkit-slider-thumb  { transform: scale(1.18); }
+    .slider:active::-webkit-slider-thumb { transform: scale(1.05); box-shadow: 0 0 0 6px rgba(255,255,255,.07); }
+    .slider:disabled { opacity: .35; cursor: default; }
+    .slider:disabled::-webkit-slider-thumb { transform: none; }
+    .slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px rgba(255,255,255,.14); }
+    .slider:focus { outline: none; }
+
+    /* A lit lamp tints its own card. Kept low-alpha so a room full of lights
+       still reads as a calm grid rather than a set of coloured billboards. */
+    .tinted { background-repeat: no-repeat; }
+
+    /* A command in flight: the control breathes until the device answers. */
+    @keyframes pulse-soft { 0%, 100% { opacity: 1 } 50% { opacity: .45 } }
+    .is-pending { animation: pulse-soft 1.1s ease-in-out infinite; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+{% block content %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,115 @@
+# Base stack (doc §12). Startup order: db (healthy) -> migrate (completed) -> app.
+#
+# docker-compose.override.yml is loaded automatically for development;
+# docker-compose.prod.yml is the production overlay (see `make prod-deploy`).
+
+# DATABASE_URL in .env points at 127.0.0.1 because that is what the host-side
+# tools need (make migrate, scripts/backup.sh, running uvicorn directly). Inside
+# a container 127.0.0.1 is the container itself, so the service name is
+# substituted here -- `environment` wins over `env_file`.
+x-db-url: &db-url
+  DATABASE_URL: postgresql://${POSTGRES_USER:-iot}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-iot}
+
+services:
+  db:
+    image: timescale/timescaledb:2.17.2-pg16
+    container_name: iot-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-iot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-iot}
+    # Doc §11: never expose 5432 beyond the host.
+    ports:
+      - "127.0.0.1:5432:5432"
+    command: >
+      postgres
+      -c fsync=on
+      -c full_page_writes=on
+      -c synchronous_commit=on
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-iot} -d ${POSTGRES_DB:-iot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Runs to completion before the app starts, so the app never races the schema.
+  migrate:
+    build: .
+    image: iot-control-app
+    container_name: iot-migrate
+    command: ["migrate"]
+    env_file: .env
+    environment:
+      <<: *db-url
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build: .
+    image: iot-control-app
+    container_name: iot-app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      <<: *db-url
+    # matter-server runs in the host network namespace, so from in here it is
+    # reachable through the host gateway. Set MATTER_WS_URL in .env to
+    # ws://host.docker.internal:5580/ws when both run on this machine.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      # APP_BIND=127.0.0.1 keeps the dashboard off every interface except
+      # loopback -- the cloud setup publishes it through `tailscale serve`.
+      - "${APP_BIND:-0.0.0.0}:${PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # python-matter-server: the CHIP controller the MatterAdapter talks to.
+  #
+  # MUST run on a Linux host on the same L2 network as the M1 hub -- Matter
+  # needs IPv6 + mDNS on the LAN, which is why network_mode: host is not
+  # optional, and why Docker Desktop on Windows/macOS cannot host this service.
+  # Doc §11: :5580 has no authentication, so it must never be exposed.
+  matter-server:
+    image: ghcr.io/home-assistant-libs/python-matter-server:stable
+    container_name: iot-matter-server
+    # Opt-in: set COMPOSE_PROFILES=matter in .env on a box that sits on the
+    # same LAN as the hub (all-in-one Pi 4/5). The cloud deployment leaves it
+    # off and reaches the Pi's matter-server over Tailscale instead.
+    profiles: ["matter"]
+    restart: unless-stopped
+    network_mode: host
+    security_opt:
+      - apparmor=unconfined
+    volumes:
+      # Fabric keys and commissioned-node storage. Back this up: losing it
+      # means re-commissioning every device.
+      - matter-data:/data
+    command: >
+      --storage-path /data
+      --paa-root-cert-dir /data/credentials
+    # Add --bluetooth-adapter 0 (plus /run/dbus) only to commission devices that
+    # are not already on the IP network. The M1 is, so we do not.
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: iot-tunnel
+    restart: unless-stopped
+    profiles: ["tunnel"]
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN:-}
+    depends_on:
+      - app
+
+volumes:
+  timescale-data:
+  matter-data:

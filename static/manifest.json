@@ -1,0 +1,13 @@
+{
+  "name": "IoT Control Gateway",
+  "short_name": "IoT Gateway",
+  "description": "Monitor และควบคุมอุปกรณ์ Zigbee ผ่าน Matter bridge",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "lang": "th",
+  "icons": []
+}

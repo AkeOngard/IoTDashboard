@@ -1,0 +1,50 @@
+# Overlay: run the dashboard on the Pi too, live-only (no history database).
+#
+#   cd ops/pi
+#   docker compose -f docker-compose.yml -f docker-compose.dashboard.yml up -d --build
+#
+# This is the "Pi only" trial from DEPLOY-CLOUD.md §2.5 -- control stays in the
+# house (local-first) and nothing runs in the cloud. Whether a 1 GB Pi 3B can
+# carry it is exactly what the trial measures: see ops/pi/memwatch.sh.
+#
+# Needs ops/pi/.env with ALLOWED_HOSTS (see below). Building here is safe on a
+# Pi 3B: every dependency ships an aarch64 wheel, so nothing is compiled.
+services:
+  app:
+    build:
+      context: ../..
+    image: iot-control-app
+    container_name: iot-app
+    restart: unless-stopped
+    # Host networking: matter-server is on 127.0.0.1:5580 (allowed through the
+    # firewall rule on `lo`), and the dashboard lands on the Pi's port 8000.
+    network_mode: host
+    environment:
+      IOT_ADAPTER: matter
+      MATTER_WS_URL: ws://127.0.0.1:5580/ws
+      # Empty = history off. The app runs live-only and says so in the header.
+      DATABASE_URL: ""
+      HOST: ${HOST:-0.0.0.0}
+      PORT: ${PORT:-8000}
+      # No login exists yet (phase 4), so the Host check is what stops a web
+      # page you visit from driving the dashboard via DNS rebinding. Required:
+      # list the tailnet name and the Pi's LAN address, e.g.
+      #   ALLOWED_HOSTS=iot-pi.tail1a2b3c.ts.net,192.168.1.50
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?set ALLOWED_HOSTS in ops/pi/.env (see comment in docker-compose.dashboard.yml)}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8000}
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    # The app idles around 70-110 MB. The cap keeps a leak from dragging
+    # matter-server down with it: this container gets OOM-killed and restarted,
+    # the Matter fabric stays up.
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+    depends_on:
+      - matter-server

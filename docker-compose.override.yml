@@ -1,0 +1,17 @@
+# Development overlay -- loaded automatically by `docker compose`.
+# Hot reload, source mounted, and the mock adapter so no hardware is needed.
+services:
+  app:
+    command: ["dev"]
+    environment:
+      IOT_ADAPTER: ${IOT_ADAPTER:-mock}
+    volumes:
+      - ./app:/app/app:ro
+      - ./templates:/app/templates:ro
+      - ./static:/app/static:ro
+      - ./migrations:/app/migrations:ro
+      - ./scripts:/app/scripts:ro
+
+  db:
+    ports:
+      - "127.0.0.1:5432:5432"

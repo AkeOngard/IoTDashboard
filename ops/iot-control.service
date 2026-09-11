@@ -1,0 +1,20 @@
+# Doc §13: bring the whole stack up at boot, so a power cut recovers unattended.
+# Install with:
+#   sudo cp ops/iot-control.service /etc/systemd/system/
+#   sudo systemctl enable --now iot-control
+[Unit]
+Description=IoT Control Stack
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+WorkingDirectory=/home/user/iot-control
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+ExecStop=/usr/bin/docker compose -f docker-compose.yml -f docker-compose.prod.yml down
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

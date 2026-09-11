@@ -1,0 +1,32 @@
+# Raspberry Pi as a Matter bridge box only -- see DEPLOY-CLOUD.md.
+#
+# The dashboard and TimescaleDB live in the cloud; this Pi runs the single
+# service that has to sit on the same LAN as the Zemismart M1. It needs no
+# .env and none of the rest of the repository: copy this file to the Pi and
+#   docker compose up -d
+#
+# Sized for a Pi 3B (1 GB RAM): nothing else runs here, and logs are capped so
+# the SD card is not written to death.
+services:
+  matter-server:
+    image: ghcr.io/home-assistant-libs/python-matter-server:stable
+    container_name: matter-server
+    restart: unless-stopped
+    # Matter needs IPv6 link-local + mDNS on the real LAN interface.
+    network_mode: host
+    security_opt:
+      - apparmor=unconfined
+    volumes:
+      # Fabric keys and commissioned nodes. Losing this means re-commissioning
+      # every device -- back it up (DEPLOY-CLOUD.md §7).
+      - ./matter-data:/data
+    command: >
+      --storage-path /data
+      --paa-root-cert-dir /data/credentials
+      --primary-interface eth0
+      --log-level info
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
