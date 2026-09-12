@@ -21,16 +21,25 @@ import aiohttp
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.adapters.matter_adapter import (  # noqa: E402
     ATTR_TO_CAP,
+    A_LABEL_LIST,
     A_NODE_LABEL,
+    A_PARTS_LIST,
     C_BRIDGED_BASIC,
+    C_DESCRIPTOR,
+    C_FIXED_LABEL,
+    C_USER_LABEL,
     DEVICE_TYPE_KIND,
     _device_type_ids,
+    _label_list,
+    _name_for,
+    _parent_map,
     _split_path,
 )
 from app.config import settings  # noqa: E402
 
 CLUSTER_NAMES = {
     6: "OnOff", 8: "LevelControl", 29: "Descriptor", 40: "BasicInformation",
+    64: "FixedLabel", 65: "UserLabel",
     47: "PowerSource", 57: "BridgedDeviceBasicInformation", 69: "BooleanState",
     768: "ColorControl", 1024: "IlluminanceMeasurement", 1026: "TemperatureMeasurement",
     1029: "RelativeHumidityMeasurement", 1030: "OccupancySensing",
@@ -74,18 +83,34 @@ async def dump(url: str, raw: bool) -> int:
                 continue
             endpoints.setdefault(endpoint, []).append(path)
 
+        parents = _parent_map(attributes)
         for endpoint in sorted(endpoints):
             prefix = "%d/" % endpoint
-            label = attributes.get("%s%d/%d" % (prefix, C_BRIDGED_BASIC, A_NODE_LABEL))
-            types = _device_type_ids(attributes.get("%s29/0" % prefix))
-            kinds = [DEVICE_TYPE_KIND.get(t, "0x%04X" % t) for t in types]
+            types = _device_type_ids(attributes.get("%s%d/%d" % (prefix, C_DESCRIPTOR, 0)))
+            kinds = ["0x%04X%s" % (t, "/" + DEVICE_TYPE_KIND[t] if t in DEVICE_TYPE_KIND else "")
+                     for t in types]
             caps = sorted({
                 cap.value for (cl, at), cap in ATTR_TO_CAP.items()
                 if "%s%d/%d" % (prefix, cl, at) in attributes
             })
-            print("  endpoint %-3d %-28s types=%s" % (endpoint, label or "-", kinds or "-"))
+            # What the dashboard would call it, and why.
+            resolved = _name_for(attributes, endpoint, parents.get(endpoint))
+            print("  endpoint %-3d types=%s" % (endpoint, kinds or "-"))
+            print("      NodeLabel: %r" % attributes.get(
+                "%s%d/%d" % (prefix, C_BRIDGED_BASIC, A_NODE_LABEL)))
+            for cluster, label in ((C_FIXED_LABEL, "FixedLabel"), (C_USER_LABEL, "UserLabel")):
+                path = "%s%d/%d" % (prefix, cluster, A_LABEL_LIST)
+                if path in attributes:
+                    print("      %-10s %s" % (label + ":", _label_list(attributes[path]) or "(empty)"))
+            parts = attributes.get("%s%d/%d" % (prefix, C_DESCRIPTOR, A_PARTS_LIST))
+            if parts:
+                print("      PartsList: %s" % parts)
+            if endpoint in parents:
+                print("      part of endpoint %d" % parents[endpoint][0])
             if caps:
-                print("      capabilities: %s" % ", ".join(caps))
+                print("      -> device %r  capabilities: %s" % (resolved, ", ".join(caps)))
+            else:
+                print("      -> not a device (no controllable or readable cluster)")
 
             clusters: dict[int, list[int]] = {}
             for path in endpoints[endpoint]:

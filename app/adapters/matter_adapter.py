@@ -30,6 +30,8 @@ C_DESCRIPTOR = 29
 C_BRIDGED_BASIC = 57
 C_BOOLEAN_STATE = 69
 C_COLOR_CONTROL = 768
+C_FIXED_LABEL = 64
+C_USER_LABEL = 65
 C_ILLUMINANCE = 1024
 C_TEMPERATURE = 1026
 C_HUMIDITY = 1029
@@ -43,6 +45,8 @@ A_OCCUPANCY = 0
 A_STATE_VALUE = 0
 A_BAT_PERCENT = 12
 A_DEVICE_TYPE_LIST = 0
+A_PARTS_LIST = 3
+A_LABEL_LIST = 0
 A_NODE_LABEL = 5
 A_REACHABLE = 17
 
@@ -80,6 +84,12 @@ DEVICE_TYPE_KIND: dict[int, str] = {
 #: Endpoints that only describe the bridge itself, never a real device.
 INFRA_DEVICE_TYPES = {0x000E, 0x0013, 0x0016}  # Aggregator, Bridged Node, Root
 
+#: The endpoint that carries a bridged device's identity. For a *composed*
+#: device (a 2-gang switch, say) it holds the name while its PartsList children
+#: hold the clusters you actually control -- so the name lives one level up
+#: from the endpoint that becomes a card.
+BRIDGED_NODE_TYPE = 0x0013
+
 
 class MatterAdapter:
     name = "matter"
@@ -94,6 +104,9 @@ class MatterAdapter:
         self._nodes: dict[int, dict[str, Any]] = {}
         self._devices: dict[str, Device] = {}
         self._route: dict[str, tuple[int, int]] = {}
+        #: (node, endpoint carrying Reachable) -> devices it speaks for. A
+        #: composed device reports Reachable once, on its parent endpoint.
+        self._reach: dict[tuple[int, int], list[str]] = {}
         self._on_state: StateSink | None = None
         self._on_status: StatusSink | None = None
         self._ready = asyncio.Event()
@@ -232,21 +245,37 @@ class MatterAdapter:
     def _rebuild(self) -> None:
         devices: dict[str, Device] = {}
         route: dict[str, tuple[int, int]] = {}
+        reach: dict[tuple[int, int], list[str]] = {}
         for node_id, node in self._nodes.items():
             attributes: dict[str, Any] = node.get("attributes") or {}
             node_name = attributes.get("0/%d/%d" % (C_BASIC, A_NODE_LABEL)) or ("Node %d" % node_id)
+            parents = _parent_map(attributes)
             for endpoint in sorted({_endpoint_of(path) for path in attributes}):
                 if endpoint is None or endpoint == 0:
                     continue
-                device = self._build_device(node_id, endpoint, attributes, str(node_name))
+                device = self._build_device(
+                    node_id, endpoint, attributes, str(node_name), parents
+                )
                 if device is not None:
                     devices[device.id] = device
                     route[device.id] = (node_id, endpoint)
+                    source = endpoint
+                    if endpoint in parents and "%d/%d/%d" % (
+                        endpoint, C_BRIDGED_BASIC, A_REACHABLE
+                    ) not in attributes:
+                        source = parents[endpoint][0]
+                    reach.setdefault((node_id, source), []).append(device.id)
         self._devices = devices
         self._route = route
+        self._reach = reach
 
     def _build_device(
-        self, node_id: int, endpoint: int, attributes: dict[str, Any], node_name: str
+        self,
+        node_id: int,
+        endpoint: int,
+        attributes: dict[str, Any],
+        node_name: str,
+        parents: dict[int, tuple[int, list[int]]],
     ) -> Device | None:
         prefix = "%d/" % endpoint
         capabilities: list[Capability] = []
@@ -265,9 +294,9 @@ class MatterAdapter:
         if kind is None:
             kind = "light" if Capability.SWITCH in capabilities else "sensor"
 
-        label = attributes.get("%s%d/%d" % (prefix, C_BRIDGED_BASIC, A_NODE_LABEL))
-        name = str(label).strip() if label else "%s ep%d" % (node_name, endpoint)
-        reachable = attributes.get("%s%d/%d" % (prefix, C_BRIDGED_BASIC, A_REACHABLE))
+        parent = parents.get(endpoint)
+        name = _name_for(attributes, endpoint, parent) or "%s ep%d" % (node_name, endpoint)
+        reachable = _reachable(attributes, endpoint, parent)
 
         return Device(
             id="matter:%d:%d" % (node_id, endpoint),
@@ -331,9 +360,10 @@ class MatterAdapter:
         device_id = "matter:%d:%d" % (node_id, endpoint)
 
         if (cluster, attribute) == (C_BRIDGED_BASIC, A_REACHABLE):
-            device = self._devices.get(device_id)
-            if device is not None:
-                device.online = bool(raw)
+            for target in self._reach.get((node_id, endpoint), [device_id]):
+                device = self._devices.get(target)
+                if device is not None:
+                    device.online = bool(raw)
             return
 
         cap = ATTR_TO_CAP.get((cluster, attribute))
@@ -397,6 +427,88 @@ def _device_type_ids(raw: Any) -> list[int]:
         if isinstance(value, int):
             ids.append(value)
     return ids
+
+
+def _parent_map(attributes: dict[str, Any]) -> dict[int, tuple[int, list[int]]]:
+    """child endpoint -> (bridged-node endpoint, all of its children).
+
+    Only Bridged Node endpoints count as parents. The root and the aggregator
+    also list endpoints in their PartsList -- the root lists every endpoint on
+    the node -- so trusting PartsList alone would make endpoint 0 the parent of
+    everything.
+    """
+    parents: dict[int, tuple[int, list[int]]] = {}
+    for endpoint in {_endpoint_of(path) for path in attributes}:
+        if endpoint is None:
+            continue
+        types = _device_type_ids(
+            attributes.get("%d/%d/%d" % (endpoint, C_DESCRIPTOR, A_DEVICE_TYPE_LIST))
+        )
+        if BRIDGED_NODE_TYPE not in types:
+            continue
+        parts = attributes.get("%d/%d/%d" % (endpoint, C_DESCRIPTOR, A_PARTS_LIST))
+        if not isinstance(parts, list):
+            continue
+        children = [int(c) for c in parts if isinstance(c, int) and c != endpoint]
+        for child in children:
+            parents[child] = (endpoint, children)
+    return parents
+
+
+def _label_list(raw: Any) -> list[str]:
+    """FixedLabel / UserLabel LabelList -> the values worth showing."""
+    if not isinstance(raw, list):
+        return []
+    values: list[str] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        value = str(entry.get("value", entry.get("1", ""))).strip()
+        if value:
+            values.append(value)
+    return values
+
+
+def _node_label(attributes: dict[str, Any], endpoint: int) -> str:
+    label = attributes.get("%d/%d/%d" % (endpoint, C_BRIDGED_BASIC, A_NODE_LABEL))
+    return str(label).strip() if label else ""
+
+
+def _endpoint_label(attributes: dict[str, Any], endpoint: int) -> str:
+    """Every name an endpoint offers for itself, best first."""
+    own = _node_label(attributes, endpoint)
+    if own:
+        return own
+    for cluster in (C_USER_LABEL, C_FIXED_LABEL):
+        values = _label_list(attributes.get("%d/%d/%d" % (endpoint, cluster, A_LABEL_LIST)))
+        if values:
+            return " ".join(values)
+    return ""
+
+
+def _name_for(
+    attributes: dict[str, Any], endpoint: int, parent: tuple[int, list[int]] | None
+) -> str:
+    own = _endpoint_label(attributes, endpoint)
+    if own or parent is None:
+        return own
+    # A composed device keeps its name on the bridged-node endpoint, so borrow
+    # it and number the parts: "2 Gang Switch 1", "2 Gang Switch 2".
+    parent_endpoint, siblings = parent
+    base = _endpoint_label(attributes, parent_endpoint)
+    if not base or len(siblings) < 2:
+        return base
+    return "%s %d" % (base, siblings.index(endpoint) + 1)
+
+
+def _reachable(
+    attributes: dict[str, Any], endpoint: int, parent: tuple[int, list[int]] | None
+) -> Any:
+    """Reachable lives on the bridged-node endpoint, not on its parts."""
+    own = attributes.get("%d/%d/%d" % (endpoint, C_BRIDGED_BASIC, A_REACHABLE))
+    if own is not None or parent is None:
+        return own
+    return attributes.get("%d/%d/%d" % (parent[0], C_BRIDGED_BASIC, A_REACHABLE))
 
 
 def _decode(cap: Capability, raw: Any) -> Any:
