@@ -41,7 +41,7 @@ Pi 3B (RAM 1GB) รัน stack เต็มไม่ไหว จึงให�
 | บริการ | ได้ฟรีอะไร | เงื่อนไขที่ต้องระวัง |
 |---|---|---|
 | Oracle Cloud Always Free | Ampere A1 รวม **2 OCPU / 12 GB**, disk รวม 200 GB, ส่งข้อมูลออก 10 TB/เดือน | ต้องมีบัตรเครดิต · home region เลือกครั้งเดียวถาวร · VM ที่ "idle" 7 วันอาจโดนเก็บคืน (ดูข้อ 3) |
-| Tailscale Personal | **6 users, อุปกรณ์ไม่จำกัด**, ฟรีถาวร | Serve (ใช้ในบ้าน tailnet) ใช้ได้ · Funnel (เปิด public) ต้องจ่าย — ซึ่งเราไม่ใช้อยู่แล้ว |
+| Tailscale Personal | **6 users, อุปกรณ์ไม่จำกัด**, ฟรีถาวร | Serve (เฉพาะใน tailnet) ใช้ได้ · Funnel (เปิด public) ก็ฟรี (beta) แต่ **ห้ามใช้จนกว่าแอปจะมี login** — ดู "เปิดจากเครื่องที่ไม่มี Tailscale" ข้อ 6 |
 
 stack ของเรากินจริงราว 1 GB บน VM — ใช้โควตาไม่ถึง 10%
 
@@ -194,6 +194,7 @@ dashboard ตัวนี้ถูกจำกัด RAM ไว้ที่ 256 
 
 - ในบ้าน: `http://192.168.1.50:8000`
 - จากที่ไหนก็ได้: `sudo tailscale serve --bg --https=443 localhost:8000` → `https://iot-pi.<tailnet>.ts.net`
+  — **เครื่องที่เปิดต้องต่อ Tailscale อยู่** ไม่ใช่ URL สาธารณะ (ดู "เปิดจากข้างนอกบ้าน" ในข้อ 6)
 
 แถบบนสุดควรขึ้น **"ทำงานปกติ · ไม่บันทึกประวัติ"** — ถูกต้องสำหรับโหมดนี้
 ถ้าขึ้น "กำลังเชื่อมต่อ matter" ค้างอยู่ แปลว่า dashboard ต่อ matter-server ไม่ถึง ให้ดู `docker logs matter-server`
@@ -352,6 +353,33 @@ tailscale serve status
 
 ดูที่แถบบนของหน้าเว็บ: จุดสีเขียว + "ทำงานปกติ" แปลว่า WebSocket วิ่งผ่าน serve ได้แล้ว
 การตั้งค่า serve ถูกเก็บไว้ใน tailscaled จึงอยู่รอดหลังรีบูต
+
+### เปิดจากข้างนอกบ้าน
+
+`serve` ไม่ได้เปิดสู่ internet สาธารณะ — **เครื่องที่จะเปิดต้องต่อ Tailscale อยู่** แล้วจะเปิดได้จาก
+เน็ตที่ไหนก็ได้ (4G, Wi-Fi ที่ทำงาน): ลงแอป Tailscale → login บัญชีเดียวกัน → เปิดสวิตช์ให้ Connected
+(Android ต้องเปิด *Use Tailscale DNS* ด้วย ไม่งั้นชื่อ `.ts.net` จะหาไม่เจอ)
+
+ถ้าต่อ Tailscale แล้วยังเปิดไม่ได้ ให้ดูข้อความ error:
+
+| เห็นอะไร | สาเหตุ | เช็คที่ Pi / VM |
+|---|---|---|
+| หาเว็บไม่เจอ / `DNS_PROBE` | เครื่องนั้นไม่ได้ต่อ Tailscale หรือ DNS ของ Tailscale ปิด | `tailscale status` ต้องเห็นเครื่องนั้นในรายการ |
+| `502 Bad Gateway` | serve ทำงาน แต่ dashboard ไม่ได้รัน | `curl -s localhost:8000/healthz` · `docker ps` · `docker logs iot-app` |
+| `400 Invalid host header` | ชื่อไม่อยู่ใน `ALLOWED_HOSTS` | ต้องมีชื่อ `.ts.net` เต็มตรงตัวอักษร |
+| cert error ครั้งแรก | Let's Encrypt กำลังออก cert | รอสัก 1 นาทีแล้วโหลดใหม่ |
+
+### เปิดจากเครื่องที่ไม่มี Tailscale — ยังไม่ควรทำ
+
+Tailscale Funnel (`tailscale funnel`) เปิดชื่อเดียวกันนี้ให้ทุกคนบน internet เข้าได้ และใช้ได้ฟรี
+แต่ **ตอนนี้แอปยังไม่มีระบบ login** เปิดไปแล้วใครเจอ URL ก็เปิด-ปิดไฟในบ้านได้ทันที และไม่ต้องรอให้ใครบังเอิญเจอ:
+cert HTTPS ทุกใบถูกประกาศลง Certificate Transparency log สาธารณะ บอทสแกนชื่อโดเมนใหม่จากตรงนั้นภายในไม่กี่นาที
+
+ถ้าจำเป็นต้องเข้าจากเครื่องที่ลง Tailscale ไม่ได้ ทางที่ปลอดภัยคือ:
+
+- **Cloudflare Tunnel + Cloudflare Access** — มีหน้า login (เช่นรหัส OTP ทางอีเมล) กั้นก่อนถึงแอป
+  ฟรี แต่ต้องมีโดเมนที่ใช้ DNS ของ Cloudflare
+- **ทำเฟส 4 (login + 2FA) ให้เสร็จก่อน** แล้วค่อยพิจารณา Funnel
 
 ---
 

@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     iot_adapter: str = "mock"
     matter_ws_url: str = "ws://127.0.0.1:5580/ws"
     command_timeout: float = 5.0
+    #: How long to wait for a matter-server reply. The CHIP stack can block
+    #: its event loop for seconds on a slow board, so keep this generous.
+    matter_rpc_timeout: float = 30.0
 
     #: Tuya Cloud, only needed when iot_adapter is "tuya" or "hybrid".
     tuya_access_id: str = ""

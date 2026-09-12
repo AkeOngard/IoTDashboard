@@ -7,6 +7,11 @@
 #
 # Sized for a Pi 3B (1 GB RAM): nothing else runs here, and logs are capped so
 # the SD card is not written to death.
+#
+# MATTER_PRIMARY_IFACE tells Matter which interface carries the IPv6
+# link-local addresses it advertises on. Default eth0; set it to wlan0 in
+# ops/pi/.env when the Pi is on Wi-Fi, or the log fills with
+#   'Failed to advertise records ... Network is unreachable'.
 services:
   matter-server:
     image: ghcr.io/home-assistant-libs/python-matter-server:stable
@@ -23,7 +28,7 @@ services:
     command: >
       --storage-path /data
       --paa-root-cert-dir /data/credentials
-      --primary-interface eth0
+      --primary-interface ${MATTER_PRIMARY_IFACE:-eth0}
       --log-level info
     logging:
       driver: json-file

@@ -17,7 +17,7 @@ import aiohttp
 
 from app.adapters.base import StateSink, StatusSink
 from app.config import settings
-from app.models import Capability, Command, CommandError, Device
+from app.models import Capability, Command, CommandError, Device, StateEvent
 
 log = logging.getLogger(__name__)
 
@@ -153,16 +153,29 @@ class MatterAdapter:
                 hello.get("schema_version"),
                 hello.get("fabric_id"),
             )
-            nodes = await self._call("start_listening")
-            self._ingest_nodes(nodes or [])
-            self._ready.set()
-            await self._emit_status(True)
-            async for msg in ws:
-                if msg.type is aiohttp.WSMsgType.TEXT:
-                    await self._handle(msg.json())
-                elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
-                    break
+            # The reader has to be running *before* the first command: replies
+            # are matched by message_id inside _handle, so calling and awaiting
+            # a reply with no reader yet would simply time out every time.
+            reader = asyncio.create_task(self._ingest(ws))
+            try:
+                nodes = await self._call("start_listening")
+                self._ingest_nodes(nodes or [])
+                await self._replay_state()
+                self._ready.set()
+                await self._emit_status(True)
+                await reader          # returns when the socket closes
+            finally:
+                reader.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await reader
         raise ConnectionError("websocket closed")
+
+    async def _ingest(self, ws: aiohttp.ClientWebSocketResponse) -> None:
+        async for msg in ws:
+            if msg.type is aiohttp.WSMsgType.TEXT:
+                await self._handle(msg.json())
+            elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                break
 
     # -------------------------------------------------------------- protocol
 
@@ -175,7 +188,7 @@ class MatterAdapter:
         self._calls[message_id] = future
         await self._ws.send_json({"message_id": message_id, "command": command, "args": args})
         try:
-            return await asyncio.wait_for(future, timeout=10)
+            return await asyncio.wait_for(future, timeout=settings.matter_rpc_timeout)
         except asyncio.TimeoutError as exc:
             raise CommandError("matter-server did not answer " + command) from exc
         finally:
@@ -201,6 +214,7 @@ class MatterAdapter:
         elif event in ("node_added", "node_updated"):
             if isinstance(data, dict):
                 self._ingest_nodes([data])
+                await self._replay_state()
         elif event == "node_removed":
             self._nodes.pop(int(data), None)
             self._rebuild()
@@ -269,6 +283,29 @@ class MatterAdapter:
     async def discover(self) -> list[Device]:
         return list(self._devices.values())
 
+    async def _replay_state(self) -> None:
+        """Publish the values that arrived with the node dump.
+
+        start_listening returns the current attribute map, but after that the
+        server only sends *changes*. Without replaying it, every reading shows
+        as blank until the device happens to report again -- which for a quiet
+        sensor can be many minutes.
+        """
+        if self._on_state is None:
+            return
+        for node_id, node in self._nodes.items():
+            for path, raw in (node.get("attributes") or {}).items():
+                endpoint, cluster, attribute = _split_path(path)
+                if endpoint is None:
+                    continue
+                cap = ATTR_TO_CAP.get((cluster, attribute))
+                device_id = "matter:%d:%d" % (node_id, endpoint)
+                if cap is None or device_id not in self._devices:
+                    continue
+                value = _decode(cap, raw)
+                if value is not None:
+                    await self._on_state(StateEvent(device_id, cap, value))
+
     async def commission(self, code: str) -> dict[str, Any]:
         """Join a device to our fabric with its 11-digit pairing code.
 
@@ -305,8 +342,6 @@ class MatterAdapter:
         value = _decode(cap, raw)
         if value is None or self._on_state is None:
             return
-        from app.models import StateEvent
-
         await self._on_state(StateEvent(device_id, cap, value))
 
     async def _emit_status(self, connected: bool) -> None:
