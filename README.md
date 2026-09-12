@@ -256,6 +256,8 @@ TemperatureMeasurement (1026), RelativeHumidityMeasurement (1029) เป็น�
 
 **ชื่ออุปกรณ์** — M1 ส่งมาแค่ชื่อที่ตัว hub รู้จัก ซึ่งมักเป็นชื่อรุ่น (`2 Gang Switch`)
 ไม่ใช่ชื่อที่ตั้งไว้ใน Tuya app เพราะชื่อนั้นอยู่บน Tuya cloud ไม่ได้อยู่ในตัว hub
+(`FixedLabel` ของ M1 ก็ใช้ไม่ได้ — มันใส่ค่าตัวอย่างจากสเปคมาตรง ๆ คือ
+`room='bedroom 2', orientation='North', floor='2', direction='up'` เหมือนกันทุก endpoint)
 Matter ไม่มีช่องทางขอชื่อนั้น จึงตั้งชื่อและกำหนดห้องเองได้จากปุ่มดินสอบนการ์ด
 เก็บเป็นไฟล์ JSON (`DEVICE_LABELS_PATH`) ไม่ได้เก็บใน database — โหมด Pi-only
 ที่ไม่มี DB ก็ต้องจำชื่อได้ ตั้งชื่อในแอป Tuya ใหม่ชื่อที่นี่ก็ไม่หาย

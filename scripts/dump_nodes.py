@@ -30,7 +30,7 @@ from app.adapters.matter_adapter import (  # noqa: E402
     C_USER_LABEL,
     DEVICE_TYPE_KIND,
     _device_type_ids,
-    _label_list,
+    _label_entries,
     _name_for,
     _parent_map,
     _split_path,
@@ -101,7 +101,8 @@ async def dump(url: str, raw: bool) -> int:
             for cluster, label in ((C_FIXED_LABEL, "FixedLabel"), (C_USER_LABEL, "UserLabel")):
                 path = "%s%d/%d" % (prefix, cluster, A_LABEL_LIST)
                 if path in attributes:
-                    print("      %-10s %s" % (label + ":", _label_list(attributes[path]) or "(empty)"))
+                    pairs = ["%s=%r" % (k or "?", v) for k, v in _label_entries(attributes[path])]
+                    print("      %-10s %s" % (label + ":", ", ".join(pairs) or "(empty)"))
             parts = attributes.get("%s%d/%d" % (prefix, C_DESCRIPTOR, A_PARTS_LIST))
             if parts:
                 print("      PartsList: %s" % parts)

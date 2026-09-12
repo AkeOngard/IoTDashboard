@@ -455,18 +455,31 @@ def _parent_map(attributes: dict[str, Any]) -> dict[int, tuple[int, list[int]]]:
     return parents
 
 
-def _label_list(raw: Any) -> list[str]:
-    """FixedLabel / UserLabel LabelList -> the values worth showing."""
+def _label_entries(raw: Any) -> list[tuple[str, str]]:
+    """FixedLabel / UserLabel LabelList as (label, value) pairs."""
     if not isinstance(raw, list):
         return []
-    values: list[str] = []
+    entries: list[tuple[str, str]] = []
     for entry in raw:
         if not isinstance(entry, dict):
             continue
+        label = str(entry.get("label", entry.get("0", ""))).strip()
         value = str(entry.get("value", entry.get("1", ""))).strip()
-        if value:
-            values.append(value)
-    return values
+        if label or value:
+            entries.append((label, value))
+    return entries
+
+
+def _user_label_name(attributes: dict[str, Any], endpoint: int) -> str:
+    """A single UserLabel entry is somebody naming this endpoint. Several
+    labelled entries are metadata, not a name -- and FixedLabel is not a name
+    source at all: the M1 ships the spec's own room/orientation/floor/direction
+    sample values, identical on every endpoint.
+    """
+    entries = _label_entries(
+        attributes.get("%d/%d/%d" % (endpoint, C_USER_LABEL, A_LABEL_LIST))
+    )
+    return entries[0][1] if len(entries) == 1 and entries[0][1] else ""
 
 
 def _node_label(attributes: dict[str, Any], endpoint: int) -> str:
@@ -476,14 +489,7 @@ def _node_label(attributes: dict[str, Any], endpoint: int) -> str:
 
 def _endpoint_label(attributes: dict[str, Any], endpoint: int) -> str:
     """Every name an endpoint offers for itself, best first."""
-    own = _node_label(attributes, endpoint)
-    if own:
-        return own
-    for cluster in (C_USER_LABEL, C_FIXED_LABEL):
-        values = _label_list(attributes.get("%d/%d/%d" % (endpoint, cluster, A_LABEL_LIST)))
-        if values:
-            return " ".join(values)
-    return ""
+    return _node_label(attributes, endpoint) or _user_label_name(attributes, endpoint)
 
 
 def _name_for(
