@@ -19,6 +19,7 @@ from app.adapters import build_adapter
 from app.config import STATIC_DIR, TEMPLATES_DIR, settings
 from app.db import Database
 from app.hub import Hub
+from app.labels import LabelStore
 from app.routes_devices import router as devices_router
 from app.telemetry import Recorder
 
@@ -73,8 +74,17 @@ async def lifespan(app: FastAPI):
     await recorder.start()
     app.state.recorder = recorder
 
+    labels = LabelStore(settings.device_labels_path or None)
+    labels.load()
+    app.state.labels = labels
+
     adapter = build_adapter(settings.iot_adapter)
-    hub = Hub(adapter, command_timeout=settings.command_timeout, recorder=recorder)
+    hub = Hub(
+        adapter,
+        command_timeout=settings.command_timeout,
+        recorder=recorder,
+        labels=labels,
+    )
     app.state.hub = hub
 
     log.info("starting with %s adapter (history: %s)", adapter.name, "on" if db.enabled else "off")

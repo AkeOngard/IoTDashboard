@@ -58,6 +58,8 @@ function dashboard() {
     STALE_SECONDS: 600,
 
     devices: [], states: {}, pending: {}, toasts: [],
+    // The card being renamed, and the draft being typed into it.
+    editing: null, draft: { name: '', room: '' }, saving: false,
     socket: false, adapterConnected: false, adapterName: '—', historyEnabled: false,
     chart: { open: false, device: null, capability: null, hours: 24, loading: false, data: null, error: null },
     _ws: null, _backoff: 1000, _timers: {}, _toastSeq: 0, _tick: 0, _chartjs: null, _reqSeq: 0,
@@ -96,6 +98,10 @@ function dashboard() {
         msg.states.forEach(s => { this.states[this.key(s.device_id, s.capability)] = s; });
         this.pending = {};
         msg.pending.forEach(p => { this.pending[this.key(p.device_id, p.capability)] = p.value; });
+      } else if (msg.type === 'devices') {
+        // A rename: only the inventory changed, so leave state and pending
+        // alone rather than replacing them with a whole new snapshot.
+        this.devices = msg.devices;
       } else if (msg.type === 'state') {
         this.states[this.key(msg.device_id, msg.capability)] = msg;
       } else if (msg.type === 'adapter') {
@@ -316,6 +322,58 @@ function dashboard() {
       } catch (err) {
         delete this.pending[this.key(id, cap)];
         this.toast('error', 'ส่งคำสั่งไม่ได้', err.message);
+      }
+    },
+
+    // ------------------------------------------------------------ naming
+
+    /* The hub only reports its own labels -- a product name at best, nothing
+     * at all for the parts of a composed device -- so names are ours to keep.
+     * "Unassigned" is a placeholder, not a room, so never seed the field
+     * with it. */
+    startEdit(device) {
+      this.editing = device.id;
+      this.draft = {
+        name: device.name || '',
+        room: device.room === 'Unassigned' ? '' : (device.room || ''),
+      };
+    },
+
+    cancelEdit() { this.editing = null; this.saving = false; },
+
+    async saveEdit(device) {
+      const name = this.draft.name.trim();
+      const room = this.draft.room.trim();
+      // Sending the hub's own name back would store a pointless override that
+      // then stops tracking the hub; treat "unchanged" as "no override".
+      const body = {
+        name: name === (device.hub_name || '') ? '' : name,
+        room: room === (device.hub_room || '') ? '' : room,
+      };
+      this.saving = true;
+      try {
+        await apiFetch(`/api/devices/${encodeURIComponent(device.id)}/label`,
+          { method: 'PATCH', json: body });
+        this.editing = null;
+      } catch (err) {
+        this.toast('error', 'บันทึกชื่อไม่สำเร็จ', err.message);
+      } finally {
+        this.saving = false;
+      }
+    },
+
+    /** Drop the name override only -- the room is the operator's either way,
+     *  and clearing a field then saving is how you undo that one. */
+    async resetLabel(device) {
+      this.saving = true;
+      try {
+        await apiFetch(`/api/devices/${encodeURIComponent(device.id)}/label`,
+          { method: 'PATCH', json: { name: '' } });
+        this.editing = null;
+      } catch (err) {
+        this.toast('error', 'บันทึกชื่อไม่สำเร็จ', err.message);
+      } finally {
+        this.saving = false;
       }
     },
 

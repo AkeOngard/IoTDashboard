@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import logging
 import time
 from typing import Any
 
 from app.adapters.base import DeviceAdapter
+from app.labels import LabelStore
 from app.models import (
     CONFIRM_TOLERANCE,
     WRITABLE,
@@ -45,10 +47,12 @@ class Hub:
         adapter: DeviceAdapter,
         command_timeout: float = 5.0,
         recorder: Any | None = None,
+        labels: LabelStore | None = None,
     ) -> None:
         self._adapter = adapter
         self._timeout = command_timeout
         self._recorder = recorder
+        self._labels = labels or LabelStore(None)
         self._devices: dict[str, Device] = {}
         self._states: dict[tuple[str, Capability], StateEvent] = {}
         self._pending: dict[tuple[str, Capability], _Pending] = {}
@@ -75,8 +79,31 @@ class Hub:
         async with self._lock:
             self._devices = {d.id: d for d in devices}
         if self._recorder is not None:
-            await self._recorder.sync_devices(devices)
+            # The inventory table should read like the dashboard does, so the
+            # local names go in -- but on copies: the adapter owns these
+            # objects and mutates `online` on them.
+            await self._recorder.sync_devices([self._renamed(d) for d in devices])
         await self._broadcast(self.snapshot())
+
+    def _renamed(self, device: Device) -> Device:
+        entry = self._labels.get(device.id)
+        if not entry:
+            return device
+        return dataclasses.replace(
+            device, name=entry.get("name", device.name), room=entry.get("room", device.room)
+        )
+
+    async def relabel(self, device_id: str, name: Any = None, room: Any = None) -> dict[str, Any]:
+        """Rename a device locally. Matter only ever offers the hub's own label,
+        which is usually not the name the operator gave it."""
+        if device_id not in self._devices:
+            raise LookupError("unknown device " + repr(device_id))
+        self._labels.set(device_id, name=name, room=room)
+        device = self._describe(self._devices[device_id])
+        await self._broadcast(
+            {"type": "devices", "devices": [self._describe(d) for d in self._devices.values()]}
+        )
+        return device
 
     def seed_states(self, events: list[StateEvent]) -> None:
         """Pre-load cached readings (from the DB) so the dashboard is populated
@@ -94,12 +121,15 @@ class Hub:
     def adapter(self) -> DeviceAdapter:
         return self._adapter
 
+    def _describe(self, device: Device) -> dict[str, Any]:
+        return self._labels.apply(device.to_dict())
+
     def snapshot(self) -> dict[str, Any]:
         return {
             "type": "snapshot",
             "adapter": self._adapter.name,
             "connected": self._adapter_connected,
-            "devices": [d.to_dict() for d in self._devices.values()],
+            "devices": [self._describe(d) for d in self._devices.values()],
             "states": [s.to_dict() for s in self._states.values()],
             "pending": [
                 {"device_id": did, "capability": cap.value, "value": p.target}

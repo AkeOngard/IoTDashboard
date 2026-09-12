@@ -34,6 +34,11 @@ COPY static     ./static
 
 RUN chmod +x scripts/entrypoint.sh scripts/backup.sh scripts/restore.sh
 
+# Local device names live here. Created owned by `iot` so that mounting a named
+# volume over it inherits that ownership -- Docker seeds a fresh named volume
+# from the image path, permissions included, which a bind mount would not.
+RUN mkdir -p /app/data && chown iot:iot /app/data
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     HOST=0.0.0.0 \

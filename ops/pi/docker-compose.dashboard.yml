@@ -33,6 +33,10 @@ services:
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:?set ALLOWED_HOSTS in ops/pi/.env (see comment in docker-compose.dashboard.yml)}
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8000}
     read_only: true
+    volumes:
+      # The names you give devices in the dashboard. The M1 only reports its
+      # own product labels, so this is where "โคมห้องนอน" actually lives.
+      - app-data:/app/data
     tmpfs:
       - /tmp
     security_opt:
@@ -48,3 +52,6 @@ services:
         max-file: "3"
     depends_on:
       - matter-server
+
+volumes:
+  app-data:

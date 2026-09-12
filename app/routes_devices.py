@@ -70,6 +70,34 @@ async def send_command(request: Request, device_id: str, body: dict[str, Any] = 
     return await _command(request, device_id, str(capability), body["value"])
 
 
+@router.patch("/{device_id}/label")
+async def relabel_device(
+    request: Request, device_id: str, body: dict[str, Any] = Body(...)
+) -> dict[str, Any]:
+    """Rename a device, or place it in a room.
+
+    Matter only tells us the label the hub itself holds -- for a bridged Tuya
+    device that is usually a product name, and for the parts of a composed
+    device nothing at all. Send "" to drop the override and fall back to
+    whatever the hub says.
+    """
+    if not request.app.state.labels.enabled:
+        raise HTTPException(status_code=503, detail="renaming is disabled (DEVICE_LABELS_PATH is empty)")
+    if "name" not in body and "room" not in body:
+        raise HTTPException(status_code=422, detail="body needs 'name' and/or 'room'")
+    try:
+        device = await _hub(request).relabel(
+            device_id, name=body.get("name"), room=body.get("room")
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail="could not save the name: %s" % exc) from exc
+    return device
+
+
 @router.get("/{device_id}/history")
 async def device_history(
     request: Request,

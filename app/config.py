@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     #: Migrations are normally applied by the `migrate` compose service, not by
     #: the app. The app only verifies on boot (doc §12 startup order).
     run_migrations: bool = False
+    #: Local device names, kept outside the database so they survive the
+    #: Pi-only deployment (DATABASE_URL empty). Set empty to disable renaming.
+    device_labels_path: str = str(ROOT / "data" / "labels.json")
 
     # --- http ---------------------------------------------------------------
     host: str = "0.0.0.0"

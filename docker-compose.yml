@@ -62,6 +62,10 @@ services:
     # ws://host.docker.internal:5580/ws when both run on this machine.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      # Device names the operator typed in. Small, but losing it means naming
+      # every device again.
+      - app-data:/app/data
     ports:
       # APP_BIND=127.0.0.1 keeps the dashboard off every interface except
       # loopback -- the cloud setup publishes it through `tailscale serve`.
@@ -113,3 +117,4 @@ services:
 volumes:
   timescale-data:
   matter-data:
+  app-data:

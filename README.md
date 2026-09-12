@@ -151,6 +151,7 @@ MATTER_WS_URL=ws://<ip-ของ-linux-box>:5580/ws
 | `TUYA_POLL_SECONDS` | `15` | บังคับขั้นต่ำ 10 วินาที (rate limit) |
 | `DATABASE_URL` | *(ว่าง)* | เว้นว่าง = ปิด history ทั้งหมด |
 | `RUN_MIGRATIONS` | `0` | ปกติ container `migrate` เป็นคนรัน |
+| `DEVICE_LABELS_PATH` | `data/labels.json` | ชื่อ/ห้องที่ตั้งเองในหน้าเว็บ · เว้นว่าง = ปิดการเปลี่ยนชื่อ |
 | `PUBLIC_ORIGIN` | `http://localhost:8000` | CORS |
 | `ALLOWED_HOSTS` | `*` | TrustedHost (คั่นด้วย comma) — `127.0.0.1`/`localhost` ถูกเติมให้เองเพื่อ healthcheck |
 | `APP_BIND` | `0.0.0.0` | interface ที่เปิดพอร์ต dashboard · `127.0.0.1` = เข้าได้ผ่าน proxy เท่านั้น |
@@ -170,9 +171,10 @@ MATTER_WS_URL=ws://<ip-ของ-linux-box>:5580/ws
 | `POST` | `/api/devices/{id}/onoff` | `{"value": true}` |
 | `POST` | `/api/devices/{id}/level` | `{"value": 60, "capability": "brightness"}` |
 | `POST` | `/api/devices/{id}/command` | รูปทั่วไป — ที่หน้าเว็บเรียกจริง |
+| `PATCH` | `/api/devices/{id}/label` | `{"name": "โคมห้องนอน", "room": "ห้องนอน"}` · `""` = กลับไปใช้ชื่อจาก hub |
 | `GET` | `/api/devices/{id}/history` | `?capability=temperature&hours=24&points=240` |
 | `POST` | `/api/devices/commission` | ปิดเป็นค่าเริ่มต้น (`ALLOW_HTTP_COMMISSION`) · ใช้ `make commission` แทน |
-| `WS` | `/ws` | push: `snapshot` · `state` · `command` · `adapter` · `ping` |
+| `WS` | `/ws` | push: `snapshot` · `devices` · `state` · `command` · `adapter` · `ping` |
 
 ## สิ่งที่ตั้งใจออกแบบไว้แบบนี้
 
@@ -252,4 +254,15 @@ TemperatureMeasurement (1026), RelativeHumidityMeasurement (1029) เป็น�
 ถ้าจำเป็นต้องใช้ ให้ตั้ง `IOT_ADAPTER=hybrid` แล้วใส่ credential ของ Tuya —
 `DeviceRouter` จะพาอุปกรณ์ที่ Matter มองไม่เห็นไปทาง Tuya Cloud ให้เอง
 
-ใช้ `make matter-nodes` ดูว่า bridge ปล่อยอะไรออกมาจริง ๆ ก่อนเดา
+**ชื่ออุปกรณ์** — M1 ส่งมาแค่ชื่อที่ตัว hub รู้จัก ซึ่งมักเป็นชื่อรุ่น (`2 Gang Switch`)
+ไม่ใช่ชื่อที่ตั้งไว้ใน Tuya app เพราะชื่อนั้นอยู่บน Tuya cloud ไม่ได้อยู่ในตัว hub
+Matter ไม่มีช่องทางขอชื่อนั้น จึงตั้งชื่อและกำหนดห้องเองได้จากปุ่มดินสอบนการ์ด
+เก็บเป็นไฟล์ JSON (`DEVICE_LABELS_PATH`) ไม่ได้เก็บใน database — โหมด Pi-only
+ที่ไม่มี DB ก็ต้องจำชื่อได้ ตั้งชื่อในแอป Tuya ใหม่ชื่อที่นี่ก็ไม่หาย
+
+**อุปกรณ์หลายช่อง** — สวิตช์สองทางมาแบบ composed device: endpoint หนึ่งถือชื่อกับ
+สถานะออนไลน์ และ `PartsList` ชี้ไปยัง endpoint ลูกที่ถือ cluster ที่กดได้จริง
+ระบบไต่ขึ้นไปเอาชื่อจาก parent แล้วไล่เลข (`2 Gang Switch 1`, `2 Gang Switch 2`)
+
+ใช้ `make matter-nodes` ดูว่า bridge ปล่อยอะไรออกมาจริง ๆ ก่อนเดา — มันพิมพ์
+device type, ทุก label cluster, `PartsList` และชื่อที่หน้าเว็บจะเลือกใช้
