@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """Join the M1 hub (or any Matter device) to our fabric -- doc §12.
 
-    python scripts/commission.py MT:Y.K90AFN00KA0648G00
+    python scripts/commission.py 0310-062-0526            # manual pairing code
+    python scripts/commission.py MT:Y.K90AFN00KA0648G00   # scanned QR payload
 
 Get the pairing code from the Tuya app: pick the hub, open the Matter /
 third-party control menu, and let it generate a code. Multi-admin means the hub
@@ -14,6 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -21,6 +23,48 @@ import aiohttp
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.config import settings  # noqa: E402
+
+#: Base-38, the QR payload alphabet: 0-9, A-Z, and "." / "-" -- 38 symbols.
+#: They are data, not separators, so a QR payload must never be stripped.
+BASE38 = re.compile(r"^[0-9A-Z.-]+$")
+#: A manual pairing code is 11 digits, or 21 for a custom-flow device.
+MANUAL_LENGTHS = (11, 21)
+
+
+def die(message: str) -> None:
+    raise SystemExit("commission.py: %s" % message)
+
+
+def normalise(code: str) -> str:
+    """Accept what people actually paste, and reject what cannot work.
+
+    Checking here is worth the lines: the app keeps its commissioning window
+    open only for a few minutes and invalidates the code after a failed
+    attempt, so every malformed try costs a trip back to the phone.
+    """
+    code = code.strip().replace(" ", "")
+    if code[:3].upper() == "MT:":
+        body = code[3:].upper()
+        if body.isdigit() and len(body) in MANUAL_LENGTHS:
+            # "MT:" labels a scanned QR payload, which is ~19 base-38 symbols.
+            # A bare 11-digit number is a manual pairing code, and the prefix
+            # makes the SDK base-38 decode it instead -- yielding a garbage
+            # payload rather than a complaint.
+            print('dropping the "MT:" prefix: %d digits is a manual pairing code'
+                  % len(body))
+            return body
+        if not BASE38.match(body):
+            die("%r is not a QR payload -- base-38 allows only 0-9, A-Z, . and -"
+                % code)
+        return "MT:" + body
+    digits = code.replace("-", "")
+    if not digits.isdigit():
+        die("%r is neither a manual pairing code (digits) nor a QR payload (MT:...)"
+            % code)
+    if len(digits) not in MANUAL_LENGTHS:
+        die("a manual pairing code has 11 digits (21 for a custom flow); "
+            "%r has %d" % (code, len(digits)))
+    return digits
 
 
 async def commission(url: str, code: str, timeout: float) -> int:
@@ -51,6 +95,10 @@ async def commission(url: str, code: str, timeout: float) -> int:
                 if "error_code" in message:
                     print("failed: %s" % (message.get("details") or message["error_code"]),
                           file=sys.stderr)
+                    # matter-server collapses every CHIP failure into one
+                    # sentence; the actual reason is only in its own log.
+                    print("the reason is in matter-server's log:\n"
+                          "    docker logs matter-server --tail 80", file=sys.stderr)
                     return 1
                 node = message.get("result") or {}
                 print("commissioned node_id=%s" % node.get("node_id"))
@@ -68,7 +116,7 @@ def main() -> int:
     parser.add_argument("--url", default=settings.matter_ws_url)
     parser.add_argument("--timeout", type=float, default=180.0)
     args = parser.parse_args()
-    return asyncio.run(commission(args.url, args.code.strip(), args.timeout))
+    return asyncio.run(commission(args.url, normalise(args.code), args.timeout))
 
 
 if __name__ == "__main__":
