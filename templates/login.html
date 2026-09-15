@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}เข้าสู่ระบบ · IoT Control Gateway{% endblock %}
+
+{% block content %}
+<div class="flex min-h-screen items-center justify-center px-6">
+  <div class="w-full max-w-[340px]">
+
+    <div class="mb-8 text-center">
+      <h1 class="text-[15px] font-semibold tracking-tight">IoT Gateway</h1>
+      <p class="mt-1 text-[13px] text-[var(--muted)]">
+        {% if setup_needed %}ยังไม่ได้ตั้งรหัสผ่าน{% else %}ใส่รหัสผ่านเพื่อเข้าใช้งาน{% endif %}
+      </p>
+    </div>
+
+    {% if setup_needed %}
+      <!-- Setting the first password is a shell job on purpose: a dashboard
+           that lets whoever arrives first choose the password is not much of a
+           lock. Same reasoning as commissioning. -->
+      <div class="rounded-2xl bg-[var(--surface)] p-5 text-[13px] leading-relaxed ring-1 ring-white/[.05]">
+        <p class="text-[var(--muted)]">สั่งคำสั่งนี้บนเครื่องที่รัน dashboard แล้วรีเฟรชหน้านี้:</p>
+        <pre class="mt-3 overflow-x-auto rounded-lg bg-[var(--bg)] p-3 text-[12px] text-[var(--text)]"><code>docker exec -it iot-app \
+  python scripts/set_password.py</code></pre>
+        <p class="mt-3 text-[var(--faint)]">
+          จนกว่าจะตั้งรหัสผ่าน dashboard จะไม่ให้เข้าถึงอะไรเลย
+        </p>
+      </div>
+    {% else %}
+      <form x-data="login()" @submit.prevent="submit()" class="space-y-3">
+        <!-- autocomplete lets a password manager fill this; there is one
+             account, so "current-password" is the honest hint. -->
+        <input x-model="password" type="password" autocomplete="current-password"
+               autofocus placeholder="รหัสผ่าน" :disabled="busy"
+               class="w-full rounded-xl bg-[var(--surface)] px-4 py-3 text-[14px] outline-none ring-1 ring-[var(--line)] transition focus:ring-white/25 disabled:opacity-50">
+
+        <button type="submit" :disabled="busy || !password"
+                class="w-full rounded-xl bg-[var(--on)] px-4 py-3 text-[14px] font-medium text-black transition-opacity hover:opacity-90 disabled:opacity-40">
+          <span x-text="busy ? 'กำลังตรวจสอบ…' : 'เข้าสู่ระบบ'"></span>
+        </button>
+
+        <template x-if="error">
+          <p class="pt-1 text-center text-[13px] text-[var(--danger)]" x-text="error"></p>
+        </template>
+      </form>
+    {% endif %}
+
+    <p class="mt-8 text-center text-[12px] text-[var(--faint)]">
+      เข้าถึงได้เฉพาะเครื่องในเครือข่ายที่อนุญาตไว้
+    </p>
+  </div>
+</div>
+
+<script>
+  function login() {
+    return {
+      password: '', busy: false, error: '',
+
+      async submit() {
+        this.busy = true; this.error = '';
+        try {
+          await apiFetch('/api/auth/login', { json: { password: this.password } });
+          // Full navigation rather than a fetch: the session cookie is set on
+          // this response, and the dashboard opens a WebSocket on load.
+          window.location.replace('/');
+        } catch (err) {
+          // The API and the logs speak English on purpose; this screen is the
+          // one a person reads while standing in their hallway.
+          this.error = {
+            401: 'รหัสผ่านไม่ถูกต้อง',
+            429: err.message,          // already says how long to wait
+            503: 'ยังไม่ได้ตั้งรหัสผ่านบนเครื่องที่รัน dashboard',
+            0:   'ติดต่อเซิร์ฟเวอร์ไม่ได้',
+          }[err.status] || err.message || 'เข้าสู่ระบบไม่สำเร็จ';
+          this.password = '';
+          this.busy = false;
+        }
+      },
+    };
+  }
+</script>
+{% endblock %}

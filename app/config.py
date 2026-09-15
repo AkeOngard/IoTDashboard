@@ -60,6 +60,25 @@ class Settings(BaseSettings):
     allowed_hosts: str = "*"
     #: Doc §6: Cloudflare drops WebSockets idle for ~100s.
     ws_ping_seconds: float = 25.0
+    # --- login --------------------------------------------------------------
+    #: Where the password hash and session secret live. A file, not the
+    #: database: losing history must never lock the operator out of their own
+    #: lights. Empty disables login entirely -- only sane behind a network you
+    #: already trust, and the startup log says so.
+    auth_path: str = str(ROOT / "data" / "auth.json")
+    #: Optional. Left empty, a secret is generated once and kept in auth_path,
+    #: so sessions survive a restart with nothing to configure.
+    session_secret: str = ""
+    #: How long a browser stays signed in. A month, because a dashboard opened
+    #: from the sofa that asks daily teaches the operator to pick a short
+    #: password.
+    session_hours: float = 24 * 30
+    #: Failed logins allowed per client address per window. Per address on
+    #: purpose: a global lockout would let anyone who can reach the login page
+    #: lock the owner out of the house.
+    login_attempts: int = 10
+    login_window_minutes: float = 15.0
+
     #: Commissioning hands out fabric membership. Behind any proxy or port
     #: mapping every caller looks like a private address, so a "LAN only"
     #: check proves nothing -- the HTTP route stays off unless asked for, and

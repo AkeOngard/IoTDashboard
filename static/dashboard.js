@@ -76,8 +76,14 @@ function dashboard() {
       this._ws = ws;
       ws.onopen = () => { this.socket = true; this._backoff = 1000; };
       ws.onmessage = (e) => this.apply(JSON.parse(e.data));
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         this.socket = false;
+        // 1008 is the server refusing the session. Reconnecting would spin
+        // against the door for as long as the tab stays open.
+        if (event.code === 1008) {
+          window.location.replace('/login');
+          return;
+        }
         setTimeout(() => this.connect(), this._backoff);
         this._backoff = Math.min(this._backoff * 2, 15000);
       };
@@ -426,6 +432,34 @@ function dashboard() {
         this.toast('error', 'บันทึกชื่อไม่สำเร็จ', err.message);
       } finally {
         this.saving = false;
+      }
+    },
+
+    // ------------------------------------------------------------ account
+
+    account: { open: false, current: '', next: '', busy: false, error: '', done: false },
+
+    async logout() {
+      try {
+        await apiFetch('/api/auth/logout', { method: 'POST' });
+      } finally {
+        window.location.replace('/login');
+      }
+    },
+
+    async changePassword() {
+      this.account.busy = true; this.account.error = ''; this.account.done = false;
+      try {
+        await apiFetch('/api/auth/password', {
+          method: 'POST',
+          json: { current: this.account.current, new: this.account.next },
+        });
+        this.account.done = true;
+        this.account.current = ''; this.account.next = '';
+      } catch (err) {
+        this.account.error = err.message;
+      } finally {
+        this.account.busy = false;
       }
     },
 

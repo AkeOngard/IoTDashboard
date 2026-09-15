@@ -158,6 +158,10 @@ MATTER_WS_URL=ws://<ip-ของ-linux-box>:5580/ws
 | `ALLOWED_HOSTS` | `*` | TrustedHost (คั่นด้วย comma) — `127.0.0.1`/`localhost` ถูกเติมให้เองเพื่อ healthcheck |
 | `APP_BIND` | `0.0.0.0` | interface ที่เปิดพอร์ต dashboard · `127.0.0.1` = เข้าได้ผ่าน proxy เท่านั้น |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | proxy ที่ยอมเชื่อ `X-Forwarded-For` (เดิม `*` = ปลอม IP ได้) |
+| `AUTH_PATH` | `data/auth.json` | ที่เก็บ hash รหัสผ่าน · **เว้นว่าง = ปิดล็อกอิน** (log จะเตือนทุกครั้ง) |
+| `SESSION_SECRET` | *(ว่าง)* | เว้นว่าง = สุ่มเก็บไว้ใน `AUTH_PATH` ให้เอง session ข้ามการรีสตาร์ตได้ |
+| `SESSION_HOURS` | `720` | ค้างล็อกอินนานเท่าไร (30 วัน) |
+| `LOGIN_ATTEMPTS` / `LOGIN_WINDOW_MINUTES` | `10` / `15` | จำกัดการเดารหัสต่อ IP |
 | `ALLOW_HTTP_COMMISSION` | `0` | เปิด `POST /api/devices/commission` — ปกติใช้ `make commission` |
 | `WS_PING_SECONDS` | `25` | heartbeat กัน Cloudflare ตัด WS |
 | `CF_TUNNEL_TOKEN` | *(ว่าง)* | `make tunnel` |
@@ -166,7 +170,11 @@ MATTER_WS_URL=ws://<ip-ของ-linux-box>:5580/ws
 
 | Method | Path | หมายเหตุ |
 |---|---|---|
-| `GET` | `/healthz` | `degraded` เมื่อต่อ hub หรือ DB ไม่ได้ |
+| `POST` | `/api/auth/login` | `{"password": "..."}` → ตั้ง cookie · 401 ผิด · 429 เดาถี่เกินไป |
+| `POST` | `/api/auth/logout` | ล้าง cookie |
+| `POST` | `/api/auth/password` | `{"current": "...", "new": "..."}` · เปลี่ยนแล้วเบราว์เซอร์อื่นหลุดทั้งหมด |
+| `GET` | `/api/auth/status` | `{required, configured, authenticated}` |
+| `GET` | `/healthz` | `degraded` เมื่อต่อ hub หรือ DB ไม่ได้ · ไม่ได้ล็อกอินจะเห็นแค่ `status` |
 | `GET` | `/readyz` | 503 เมื่อยังไม่พร้อมรับงานจริง |
 | `GET` | `/api/devices` | snapshot: devices + states + pending |
 | `POST` | `/api/devices/refresh` | สแกน fabric ใหม่ |
@@ -241,18 +249,20 @@ TimescaleDB ใช้ image เดียวกันได้โดยไม่�
 | `main.py` รวม WS hub | แยกเป็น `hub.py` · `telemetry.py` · `history.py` | เอกสารไม่ได้ห้าม และ command lifecycle ยาวเกินกว่าจะยัดใน `main.py` |
 | WS `{"type":"devices"}` | มีทั้ง `snapshot` และ `devices` | snapshot ส่ง devices + states + pending พร้อมกันตอนเชื่อมต่อ · `devices` ส่งเฉพาะรายชื่อเวลาเปลี่ยนชื่ออุปกรณ์ จะได้ไม่ล้าง state ที่ client ถืออยู่ |
 | `device_id` = `"1:3"` | `"matter:1:3"` | DeviceRouter ต้องรู้ backend จาก id |
-| SlowAPI rate limit | ยังไม่มี | ผูกกับ auth (key ตาม actor) — ไปพร้อมเฟส security |
+| auth เก็บใน migration 002/003 | เก็บเป็นไฟล์ `AUTH_PATH` | ผู้ใช้คนเดียว และล็อกอินต้องทำงานได้แม้ database ล่ม ไม่งั้นเน็ตหลุดแล้วเข้าไปปิดไฟในบ้านตัวเองไม่ได้ · เลข 002/003 ยังจองไว้ถ้าวันหนึ่งมีหลายผู้ใช้ |
+| SlowAPI rate limit | จำกัดการเดารหัสในโค้ดเอง | ต้องกันเฉพาะหน้าล็อกอิน และเก็บสถานะในหน่วยความจำก็พอสำหรับผู้ใช้คนเดียว — ไม่คุ้มกับ dependency เพิ่ม |
 | palette `slate-950` · `emerald-500` · `amber-500` | CSS token ชุดเดียว + ramp ตามค่าที่อ่านได้ | สีถูกผูกกับความหมาย (ค่าสูง/ต่ำ, สีหลอดไฟจริง) แทนที่จะเป็นสีคงที่ต่อ component และเปลี่ยนธีมได้จากที่เดียว |
 | `rounded-lg` input · `xl` card · `2xl` modal | `2xl` card · `2xl` modal · pill สำหรับปุ่ม | ทรงโค้งชุดเดียวทั้งหน้าอ่านสงบกว่า |
 
 ## ยังไม่ได้ทำ
 
 - **เฟส 3** — MQTT bus (Mosquitto) คั่นระหว่าง adapter กับ hub · `ops/mosquitto.conf` พร้อมแล้ว
-- **เฟส 4 (security)** — `security.py` · `deps.py` · `auth.py` · `audit.py` ·
-  `routes_users.py` · `routes_audit.py` · `schemas_users.py` ·
-  templates `login.html` · `setup_2fa.html` · `force_password.html` · `audit.html` · `users.html` ·
-  migrations 002/003 · `scripts/create_admin.py` · SlowAPI · HTTP 428 gate
-  (hook ฝั่ง client มีแล้วใน [static/api.js](static/api.js))
+- **เฟส 4 (security)** — ทำแล้วเท่าที่ระบบผู้ใช้คนเดียวต้องใช้: [app/auth.py](app/auth.py) ·
+  [app/routes_auth.py](app/routes_auth.py) · [templates/login.html](templates/login.html) ·
+  [scripts/set_password.py](scripts/set_password.py) · ด่านกั้นทุก route และ WebSocket ·
+  จำกัดการเดารหัส
+  ยังไม่ได้ทำ (ต้องมีเมื่อมีผู้ใช้หลายคน): 2FA · audit log · จัดการผู้ใช้ ·
+  `routes_users.py` · `routes_audit.py` · migrations 002/003 · HTTP 428 gate
 
 ## หมายเหตุเรื่อง Matter bridge ของ Tuya
 

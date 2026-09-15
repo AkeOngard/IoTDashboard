@@ -27,8 +27,16 @@
           <span class="text-[var(--muted)]" x-text="devices.length"></span> อุปกรณ์
         </span>
         <button @click="refresh()"
-                class="-mr-3 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] text-[var(--muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
+                class="whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] text-[var(--muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
           สแกนใหม่
+        </button>
+        <button @click="account.open = !account.open" title="บัญชี"
+                class="-mr-1 shrink-0 rounded-full p-1.5 text-[var(--muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="8" cy="5.5" r="2.6" stroke="currentColor" stroke-width="1.4"/>
+            <path d="M2.8 14a5.2 5.2 0 0 1 10.4 0" stroke="currentColor" stroke-width="1.4"
+                  stroke-linecap="round"/>
+          </svg>
         </button>
       </div>
     </div>
@@ -386,5 +394,50 @@
       </div>
     </template>
   </div>
+  <!-- ── account ────────────────────────────────────────────────────────── -->
+  <template x-if="account.open">
+    <div class="fixed inset-0 z-30 flex items-start justify-center bg-black/50 px-6 pt-24 backdrop-blur-sm"
+         @click.self="account.open = false" @keydown.escape.window="account.open = false">
+      <div class="w-full max-w-[340px] rounded-2xl bg-[var(--surface)] p-5 ring-1 ring-white/[.06]">
+        <h2 class="text-[14px] font-medium tracking-tight">เปลี่ยนรหัสผ่าน</h2>
+        <p class="mt-1 text-[12px] leading-relaxed text-[var(--faint)]">
+          เปลี่ยนแล้วเบราว์เซอร์อื่นทุกเครื่องจะถูกให้ออกจากระบบ ยกเว้นเครื่องนี้
+        </p>
+
+        <div class="mt-4 space-y-2">
+          <input x-model="account.current" type="password" autocomplete="current-password"
+                 placeholder="รหัสผ่านปัจจุบัน" :disabled="account.busy"
+                 class="w-full rounded-lg bg-[var(--bg)] px-3 py-2 text-[13px] outline-none ring-1 ring-[var(--line)] focus:ring-white/25 disabled:opacity-50">
+          <input x-model="account.next" type="password" autocomplete="new-password"
+                 placeholder="รหัสผ่านใหม่ (อย่างน้อย 10 ตัว)" :disabled="account.busy"
+                 @keydown.enter="changePassword()"
+                 class="w-full rounded-lg bg-[var(--bg)] px-3 py-2 text-[13px] outline-none ring-1 ring-[var(--line)] focus:ring-white/25 disabled:opacity-50">
+        </div>
+
+        <template x-if="account.error">
+          <p class="mt-2 text-[12px] text-[var(--danger)]" x-text="account.error"></p>
+        </template>
+        <template x-if="account.done">
+          <p class="mt-2 text-[12px] text-[var(--on)]">เปลี่ยนรหัสผ่านแล้ว</p>
+        </template>
+
+        <div class="mt-4 flex items-center gap-2">
+          <button @click="changePassword()" :disabled="account.busy || !account.current || !account.next"
+                  class="rounded-lg bg-[var(--on)] px-3 py-1.5 text-[12px] font-medium text-black transition-opacity hover:opacity-90 disabled:opacity-40">
+            <span x-text="account.busy ? 'กำลังบันทึก…' : 'บันทึก'"></span>
+          </button>
+          <button @click="account.open = false"
+                  class="rounded-lg px-2.5 py-1.5 text-[12px] text-[var(--muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
+            ปิด
+          </button>
+          <button @click="logout()"
+                  class="ml-auto rounded-lg px-2.5 py-1.5 text-[12px] text-[var(--danger)] transition-colors hover:bg-[var(--surface-hover)]">
+            ออกจากระบบ
+          </button>
+        </div>
+      </div>
+    </div>
+  </template>
+
 </div>
 {% endblock %}

@@ -10,16 +10,18 @@ from typing import Any
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.adapters import build_adapter
+from app.auth import SESSION_COOKIE, AuthStore, LoginThrottle
 from app.config import STATIC_DIR, TEMPLATES_DIR, settings
 from app.db import Database
 from app.hub import Hub
 from app.labels import LabelStore
+from app.routes_auth import router as auth_router
 from app.routes_devices import router as devices_router
 from app.telemetry import Recorder
 
@@ -63,6 +65,53 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+#: Reachable without a session. Everything not on this list needs one.
+#: /healthz and /readyz stay open because the container HEALTHCHECK and any
+#: uptime monitor cannot log in -- they answer on loopback and say nothing a
+#: stranger could act on.
+PUBLIC_PATHS = frozenset({"/login", "/healthz", "/readyz", "/favicon.ico"})
+PUBLIC_PREFIXES = ("/static/", "/api/auth/")
+
+
+def _is_public(path: str) -> bool:
+    return path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES)
+
+
+class RequireLoginMiddleware(BaseHTTPMiddleware):
+    """One gate in front of everything, rather than a decorator per route.
+
+    A route added later is protected by default; forgetting to guard a new
+    endpoint is the usual way a dashboard like this springs a leak.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        store: AuthStore = request.app.state.auth
+        path = request.url.path
+        if not store.enabled or _is_public(path):
+            return await call_next(request)
+        store.reload_if_changed()
+
+        # No password set yet: refuse to serve anything rather than run open.
+        if not store.configured:
+            if path == "/" or "text/html" in request.headers.get("accept", ""):
+                return templates.TemplateResponse(
+                    request, "login.html", {"setup_needed": True}, status_code=503
+                )
+            return JSONResponse(
+                {"detail": "no password has been set; run scripts/set_password.py"},
+                status_code=503,
+            )
+
+        if store.valid(request.cookies.get(SESSION_COOKIE)):
+            return await call_next(request)
+
+        # A browser asking for a page gets the login page; anything else gets
+        # a 401 that static/api.js already knows how to act on.
+        if "text/html" in request.headers.get("accept", ""):
+            return templates.TemplateResponse(request, "login.html", status_code=401)
+        return JSONResponse({"detail": "not signed in"}, status_code=401)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db = Database(settings.database_url)
@@ -84,6 +133,13 @@ async def lifespan(app: FastAPI):
     labels = LabelStore(settings.device_labels_path or None)
     labels.load()
     app.state.labels = labels
+
+    auth = AuthStore(settings.auth_path or None, settings.session_secret)
+    auth.load()
+    app.state.auth = auth
+    app.state.login_throttle = LoginThrottle(
+        limit=settings.login_attempts, window=settings.login_window_minutes * 60
+    )
 
     adapter = build_adapter(settings.iot_adapter)
     hub = Hub(
@@ -134,6 +190,7 @@ async def _migrations(db: Database) -> dict[str, Any]:
 
 app = FastAPI(title="IoT Control Gateway", version="0.3.0", lifespan=lifespan)
 
+app.add_middleware(RequireLoginMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -144,6 +201,7 @@ app.add_middleware(
 )
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_hosts)
 
+app.include_router(auth_router)
 app.include_router(devices_router)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -152,7 +210,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 @app.get("/healthz")
-async def healthz() -> dict[str, Any]:
+async def healthz(request: Request) -> dict[str, Any]:
     hub: Hub = app.state.hub
     db: Database = app.state.db
     recorder: Recorder = app.state.recorder
@@ -169,6 +227,14 @@ async def healthz() -> dict[str, Any]:
 
     backends = getattr(hub.adapter, "backends", None)
     degraded = not snapshot["connected"] or (db.enabled and not db.available)
+
+    # Public so the container HEALTHCHECK and an uptime monitor can reach it,
+    # so an unauthenticated caller gets liveness and nothing else: how many
+    # devices are in the house is not their business.
+    store: AuthStore = app.state.auth
+    if store.enabled and not store.valid(request.cookies.get(SESSION_COOKIE)):
+        return {"status": "degraded" if degraded else "ok"}
+
     return {
         "status": "degraded" if degraded else "ok",
         "adapter": snapshot["adapter"],
@@ -194,6 +260,19 @@ async def readyz() -> JSONResponse:
 
 @app.websocket("/ws")
 async def stream(websocket: WebSocket) -> None:
+    # BaseHTTPMiddleware only runs for http scopes, so the gate above never
+    # sees this connection: check here or the socket is wide open.
+    store: AuthStore = app.state.auth
+    store.reload_if_changed()
+    if store.enabled and not store.valid(websocket.cookies.get(SESSION_COOKIE)):
+        # Accept, then close with 1008. Closing *before* accepting rejects the
+        # handshake with an HTTP 403, and a browser reports that as a plain
+        # 1006 "abnormal closure" -- indistinguishable from the server having
+        # gone away, which the client answers by reconnecting forever. Taking
+        # the socket and closing it politely is what makes the reason legible.
+        await websocket.accept()
+        await websocket.close(code=1008, reason="not signed in")
+        return
     await websocket.accept()
     hub: Hub = app.state.hub
     queue = hub.subscribe()
@@ -238,6 +317,16 @@ async def _drain(websocket: WebSocket) -> None:
 @app.get("/")
 async def index(request: Request):
     return templates.TemplateResponse(request, "dashboard.html")
+
+
+@app.get("/login")
+async def login_page(request: Request):
+    store: AuthStore = app.state.auth
+    if not store.enabled or store.valid(request.cookies.get(SESSION_COOKIE)):
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(
+        request, "login.html", {"setup_needed": not store.configured}
+    )
 
 
 if __name__ == "__main__":

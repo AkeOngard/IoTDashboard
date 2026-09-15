@@ -331,5 +331,6 @@ make prod-up
   ที่ไม่มี `make` และ Docker อยู่โหมด Windows containers ที่ตรวจได้คือ **image ทั้งสองตัวมี arm64 จริง**
   (query registry แล้ว), compose ทั้ง base และ prod overlay validate ผ่าน, และ logic ของ
   `make init` ทดสอบด้วย shell จริงแล้ว
-- ยังไม่มีระบบ login ของแอปเอง — ชั้นความปลอดภัยตอนนี้คือ LAN + Cloudflare Access เท่านั้น
-  (`security.py` / `auth.py` / audit log เป็นเฟส 4 ดู README)
+- **ต้องตั้งรหัสผ่านก่อนใช้งาน** — `docker exec -it iot-app python scripts/set_password.py`
+  ก่อนตั้ง dashboard จะไม่ให้เข้าถึงอะไรเลย ดูรายละเอียดใน DEPLOY-CLOUD.md ข้อ 2.8
+  สิ่งที่ยังไม่มีคือ 2FA, audit log และระบบผู้ใช้หลายคน (ดู README)

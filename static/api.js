@@ -44,8 +44,13 @@
     if (response.ok) return body;
 
     if (response.status === 401) {
-      // Security phase: attempt a silent refresh here, then retry once.
+      // A 401 from the login endpoint itself is just a wrong password; only a
+      // 401 from somewhere else means the session went away.
+      const fromLogin = String(path).startsWith('/api/auth/');
       window.dispatchEvent(new CustomEvent('api:unauthorized', { detail: body }));
+      if (!fromLogin && window.location.pathname !== '/login') {
+        window.location.replace('/login');
+      }
     } else if (response.status === 428) {
       // Precondition Required -- the server is telling us which gate to show.
       window.dispatchEvent(new CustomEvent('api:precondition', { detail: body }));
