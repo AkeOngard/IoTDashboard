@@ -337,10 +337,12 @@ export ข้อมูลเองเป็นประจำและเก็�
 
 `scripts/backup.sh` ชี้ไป Supabase ได้ตรง ๆ เพราะมันอ่าน `DATABASE_URL` ที่ตั้งไว้แล้ว
 
-**เช็คเวอร์ชันของเซิร์ฟเวอร์ก่อน** — ตัวเลขนี้ต้องตรงกับ image ที่จะใช้ dump:
+**เช็คเวอร์ชันของเซิร์ฟเวอร์ก่อน** — ตัวเลขนี้ต้องตรงกับ image ที่จะใช้ dump
+(ต้องใช้ `sh -c` เพราะ `DATABASE_URL` อยู่ใน container ไม่ได้อยู่ใน shell ของ Pi —
+ถ้าเขียนตรง ๆ shell จะแทนค่าว่างให้แล้ว psql จะไปลองต่อ socket ในเครื่องแทน):
 
 ```bash
-docker exec iot-app psql "$DATABASE_URL" -tAc "SHOW server_version"
+docker exec iot-app sh -c 'psql "$DATABASE_URL" -tAc "SHOW server_version"'
 ```
 
 **สั่งสำรอง** — Raspberry Pi OS ไม่ได้ติดตั้ง `pg_dump` มาให้ และถึงติดตั้งก็ได้เวอร์ชัน 15

@@ -44,7 +44,7 @@ missing_client() {
   echo "  PG_EXEC=\"docker run --rm -i postgres:17\" bash $2" >&2
   echo >&2
   echo "Check the version with:" >&2
-  echo "  docker exec iot-app psql \"\$DATABASE_URL\" -tAc \"SHOW server_version\"" >&2
+  echo "  docker exec iot-app sh -c 'psql \"\$DATABASE_URL\" -tAc \"SHOW server_version\"'" >&2
   exit 1
 }
 
