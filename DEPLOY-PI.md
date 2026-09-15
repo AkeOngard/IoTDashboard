@@ -80,14 +80,26 @@ Docker จะข้ามเพดานเหล่านั้นไปเง�
 
 ```bash
 sudo cp /boot/firmware/cmdline.txt /boot/firmware/cmdline.txt.bak
-sudo sed -i '1 s/$/ cgroup_enable=cpuset cgroup_enable=memory cgroup_memory=1/' /boot/firmware/cmdline.txt
+grep -q cgroup_memory /boot/firmware/cmdline.txt \
+  || sudo sed -i '1 s/$/ cgroup_enable=cpuset cgroup_enable=memory cgroup_memory=1/' /boot/firmware/cmdline.txt
 cat /boot/firmware/cmdline.txt        # ต้องยังเป็นบรรทัดเดียว ห้ามขึ้นบรรทัดใหม่
 ```
 
+`grep -q` ทำให้สั่งซ้ำได้ไม่มีผลข้างเคียง และ cmdline.txt ที่ขึ้นบรรทัดใหม่จะทำให้ Pi บูตไม่ขึ้น
+จนต้องถอด SD card ไปแก้กับเครื่องอื่น — `.bak` มีไว้เผื่อกรณีนั้น
+
 ```bash
 sudo reboot
-grep -w memory /sys/fs/cgroup/cgroup.controllers   # ต้องเห็นคำว่า memory
 ```
+
+หลังบูตกลับมา:
+
+```bash
+grep -w memory /sys/fs/cgroup/cgroup.controllers          # ต้องเห็นคำว่า memory
+docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}'
+```
+
+`docker stats` ต้องขึ้นเพดานจริงต่อท้าย (เช่น `/ 256MiB`) ไม่ใช่ `/ 0B` หรือขนาด RAM ทั้งเครื่อง
 
 ### ถ้าใช้ SSD: ย้ายที่เก็บข้อมูลของ Docker ไป SSD
 

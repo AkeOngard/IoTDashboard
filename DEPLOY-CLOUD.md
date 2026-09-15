@@ -81,16 +81,35 @@ echo "gpu_mem=16" | sudo tee -a /boot/firmware/config.txt
 
 ```bash
 sudo cp /boot/firmware/cmdline.txt /boot/firmware/cmdline.txt.bak
-sudo sed -i '1 s/$/ cgroup_enable=cpuset cgroup_enable=memory cgroup_memory=1/' /boot/firmware/cmdline.txt
+grep -q cgroup_memory /boot/firmware/cmdline.txt \
+  || sudo sed -i '1 s/$/ cgroup_enable=cpuset cgroup_enable=memory cgroup_memory=1/' /boot/firmware/cmdline.txt
 cat /boot/firmware/cmdline.txt        # ต้องยังเป็นบรรทัดเดียว ห้ามขึ้นบรรทัดใหม่
 ```
+
+`grep -q` ข้างหน้าทำให้สั่งซ้ำได้ไม่มีผลข้างเคียง — ถ้า `sed` วิ่งสองรอบจะได้ตัวเลือกซ้ำกันสองชุด
+ในบรรทัดเดียว ส่วน `.bak` ไว้กู้ถ้าไฟล์เพี้ยน: cmdline.txt ที่ขึ้นบรรทัดใหม่จะทำให้ Pi บูตไม่ขึ้น
+และต้องถอด SD card ไปแก้กับเครื่องอื่น
 
 แล้วรีบูตทีเดียวให้มีผลทั้งสองอย่าง:
 
 ```bash
 sudo reboot
-grep -w memory /sys/fs/cgroup/cgroup.controllers   # หลังรีบูต ต้องเห็นคำว่า memory
 ```
+
+หลังบูตกลับมา ตรวจสามอย่างนี้:
+
+```bash
+grep -w memory /sys/fs/cgroup/cgroup.controllers          # ต้องเห็นคำว่า memory
+docker inspect iot-app --format '{{.HostConfig.Memory}}'  # ต้องเป็น 268435456 ไม่ใช่ 0
+docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}'
+```
+
+`docker stats` ต้องขึ้นเป็น `... / 256MiB` พร้อมเปอร์เซ็นต์จริง ถ้ายังขึ้น `/ 0B` หรือเป็นขนาด RAM
+ทั้งเครื่อง แปลว่า cgroup ยังไม่ติด
+
+> เปิด memory cgroup แล้วเคอร์เนลจะกินแรมเพิ่มเล็กน้อย (หลักสิบ MB บนเครื่อง 1 GB) แลกกับการที่
+> เพดาน RAM บังคับได้จริง — คุ้มเมื่อ dashboard กับ matter-server อยู่เครื่องเดียวกัน เพราะตัวที่รั่ว
+> จะโดน kill เดี่ยว ๆ แทนที่จะลากทั้งเครื่องไปด้วย
 
 ### 2.2 Tailscale
 
