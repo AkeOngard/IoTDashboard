@@ -42,6 +42,7 @@ def _devices() -> list[Device]:
 
 class MockAdapter:
     name = "mock"
+    on_devices_changed = None
 
     def __init__(self) -> None:
         self._devices = _devices()

@@ -76,6 +76,97 @@
                    so the card is where a real name gets attached. -->
               <template x-if="editing !== device.id">
                 <div class="mb-4 flex items-start gap-2">
+                  <!-- Device icon. The glyph says what the thing is, its colour
+                       and glow say what it is doing right now. All of it is
+                       inline SVG driven by CSS, so the Pi serves it as part of
+                       the page and the viewer's browser does the drawing. -->
+                  <span class="dev-icon" :class="iconActive(device) && 'is-active'"
+                        :style="iconStyle(device)" aria-hidden="true">
+                    <template x-if="iconKind(device) === 'light'">
+                      <svg viewBox="0 0 24 24" fill="none">
+                        <g class="rays" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                          <path d="M12 1.5v2M3.9 4.4l1.4 1.4M1.5 12.5h2M20.1 4.4l-1.4 1.4M22.5 12.5h-2"/>
+                        </g>
+                        <path class="glow" fill="currentColor"
+                              d="M12 4.5a6.2 6.2 0 0 0-3.7 11.2v2.1h7.4v-2.1A6.2 6.2 0 0 0 12 4.5Z"/>
+                        <path d="M12 4.5a6.2 6.2 0 0 0-3.7 11.2v2.1h7.4v-2.1A6.2 6.2 0 0 0 12 4.5Z"
+                              stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                        <path d="M9.8 20.5h4.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                      </svg>
+                    </template>
+
+                    <template x-if="iconKind(device) === 'plug'">
+                      <svg viewBox="0 0 24 24" fill="none">
+                        <path class="glow" fill="currentColor"
+                              d="M6.5 9.5h11v3.2a5.5 5.5 0 0 1-11 0V9.5Z"/>
+                        <path d="M6.5 9.5h11v3.2a5.5 5.5 0 0 1-11 0V9.5Z"
+                              stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                        <path d="M9.3 9.5V4.2M14.7 9.5V4.2M12 18.2v2.6"
+                              stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                      </svg>
+                    </template>
+
+                    <template x-if="iconKind(device) === 'switch'">
+                      <svg viewBox="0 0 24 24" fill="none">
+                        <rect class="glow" x="6" y="3" width="12" height="18" rx="3" fill="currentColor"/>
+                        <rect x="6" y="3" width="12" height="18" rx="3"
+                              stroke="currentColor" stroke-width="1.5"/>
+                        <!-- The rocker itself moves: the one part of the icon
+                             that mirrors the physical thing being switched. -->
+                        <rect class="lever" x="9" y="12.6" width="6" height="5.4" rx="1.6"
+                              fill="currentColor"/>
+                      </svg>
+                    </template>
+
+                    <template x-if="iconKind(device) === 'contact'">
+                      <svg viewBox="0 0 24 24" fill="none">
+                        <path d="M4 3.5h16v17H4z" stroke="currentColor" stroke-width="1.5"
+                              stroke-linejoin="round"/>
+                        <path class="panel" d="M12 3.5h8v17h-8z" fill="currentColor"
+                              fill-opacity=".18" stroke="currentColor" stroke-width="1.5"
+                              stroke-linejoin="round"/>
+                        <circle cx="13.6" cy="12" r=".9" fill="currentColor"/>
+                      </svg>
+                    </template>
+
+                    <template x-if="iconKind(device) === 'occupancy'">
+                      <svg viewBox="0 0 24 24" fill="none">
+                        <circle class="ping" cx="12" cy="12" r="9.5" stroke="currentColor"
+                                stroke-width="1.5"/>
+                        <circle cx="12" cy="8.4" r="2.9" stroke="currentColor" stroke-width="1.5"/>
+                        <path d="M5.8 20.2a6.2 6.2 0 0 1 12.4 0" stroke="currentColor"
+                              stroke-width="1.5" stroke-linecap="round"/>
+                      </svg>
+                    </template>
+
+                    <template x-if="iconKind(device) === 'climate'">
+                      <svg viewBox="0 0 24 24" fill="none">
+                        <path d="M9.5 13.8V5a2.2 2.2 0 1 1 4.4 0v8.8a4.6 4.6 0 1 1-4.4 0Z"
+                              stroke="currentColor" stroke-width="1.5"/>
+                        <path class="mercury" d="M11.7 9.5v6.8" stroke="currentColor"
+                              stroke-width="2.6" stroke-linecap="round"/>
+                      </svg>
+                    </template>
+
+                    <template x-if="iconKind(device) === 'lux'">
+                      <svg viewBox="0 0 24 24" fill="none">
+                        <circle class="glow" cx="12" cy="12" r="4.6" fill="currentColor"/>
+                        <circle cx="12" cy="12" r="4.6" stroke="currentColor" stroke-width="1.5"/>
+                        <g class="rays" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                          <path d="M12 1.8v2.4M12 19.8v2.4M1.8 12h2.4M19.8 12h2.4M4.8 4.8l1.7 1.7M17.5 17.5l1.7 1.7M19.2 4.8l-1.7 1.7M6.5 17.5l-1.7 1.7"/>
+                        </g>
+                      </svg>
+                    </template>
+
+                    <template x-if="iconKind(device) === 'sensor'">
+                      <svg viewBox="0 0 24 24" fill="none">
+                        <circle cx="12" cy="12" r="2.6" fill="currentColor"/>
+                        <path d="M6.6 6.6a7.6 7.6 0 0 0 0 10.8M17.4 6.6a7.6 7.6 0 0 1 0 10.8"
+                              stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                      </svg>
+                    </template>
+                  </span>
+
                   <h3 class="min-w-0 flex-1 truncate text-[14px] font-medium tracking-tight"
                       :title="device.adapter + ' · ' + device.native_id
                               + (device.hub_name ? ' · hub: ' + device.hub_name : '')"

@@ -72,6 +72,7 @@ MIN_POLL_SECONDS = 10.0
 
 class TuyaAdapter:
     name = "tuya"
+    on_devices_changed = None
 
     def __init__(self) -> None:
         self._host = REGION_HOSTS.get(settings.tuya_api_region, REGION_HOSTS["us"])

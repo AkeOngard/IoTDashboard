@@ -244,6 +244,52 @@ function dashboard() {
       return '';
     },
 
+    // -------------------------------------------------------------- icons
+
+    /* Which glyph a device gets. Actuators go by device type, sensors by what
+     * they can read -- a bridge that calls everything a "sensor" still gets a
+     * thermometer if it reports temperature. */
+    iconKind(device) {
+      if (device.kind === 'light' || device.kind === 'plug' || device.kind === 'switch') {
+        return device.kind;
+      }
+      const caps = device.capabilities;
+      if (caps.includes('contact')) return 'contact';
+      if (caps.includes('occupancy')) return 'occupancy';
+      if (caps.includes('temperature') || caps.includes('humidity')) return 'climate';
+      if (caps.includes('illuminance')) return 'lux';
+      return 'sensor';
+    },
+
+    /** Is this device in the state worth noticing? Lamps and plugs: on. A
+     *  contact sensor reports true for *closed*, so open is the active one. */
+    iconActive(device) {
+      const kind = this.iconKind(device);
+      if (kind === 'contact') return this.shown(device.id, 'contact') === false;
+      if (kind === 'occupancy') return this.shown(device.id, 'occupancy') === true;
+      if (device.capabilities.includes('switch')) {
+        return this.shown(device.id, 'switch') === true;
+      }
+      return false;
+    },
+
+    /* The icon's colour and how hard it glows. A lamp wears the light it is
+     * actually making -- same Kelvin ramp as the card tint and the slider -- so
+     * a warm lamp at 10% looks like a warm lamp at 10%. */
+    iconStyle(device) {
+      if (!this.iconActive(device)) return '';
+      const kind = this.iconKind(device);
+      if (kind === 'light') {
+        const level = this.shown(device.id, 'brightness');
+        const glow = 0.12 + 0.30 * ((typeof level === 'number' ? level : 100) / 100);
+        return `--icon: ${this.rgb(this.kelvinRgb(this.shown(device.id, 'color_temp')))};`
+             + ` --glow: ${glow.toFixed(2)}`;
+      }
+      if (kind === 'contact') return '--icon: var(--c-warm); --glow: .18';
+      if (kind === 'occupancy') return '--icon: var(--c-state); --glow: .2';
+      return '--icon: var(--on); --glow: .18';
+    },
+
     statusLabel(id, cap) {
       if (this.isPending(id, cap)) return 'กำลังสั่ง…';
       const v = this.value(id, cap);

@@ -21,6 +21,7 @@ log = logging.getLogger(__name__)
 
 class DeviceRouter:
     name = "hybrid"
+    on_devices_changed = None
 
     def __init__(self, adapters: list[DeviceAdapter], overrides: dict[str, str] | None = None) -> None:
         if not adapters:

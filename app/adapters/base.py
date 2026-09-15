@@ -12,11 +12,19 @@ from app.models import Command, Device, StateEvent
 
 StateSink = Callable[[StateEvent], Awaitable[None]]
 StatusSink = Callable[[bool], Awaitable[None]]
+#: "Something about the inventory changed" -- a device appeared, vanished, or
+#: went offline. Carries no payload: the hub re-reads discover() and publishes.
+DevicesSink = Callable[[], Awaitable[None]]
 
 
 @runtime_checkable
 class DeviceAdapter(Protocol):
     name: str
+    #: Set by the hub before start(). An adapter whose device list and online
+    #: flags never change on their own can leave it alone; one that learns of
+    #: a device dropping off must call it, or open dashboards keep showing the
+    #: device as present until someone reloads.
+    on_devices_changed: DevicesSink | None
 
     async def start(self, on_state: StateSink, on_status: StatusSink) -> None:
         """Connect to the backend and begin streaming state changes."""

@@ -108,6 +108,64 @@
     @keyframes pulse-soft { 0%, 100% { opacity: 1 } 50% { opacity: .45 } }
     .is-pending { animation: pulse-soft 1.1s ease-in-out infinite; }
 
+    /* Device icons. The glyph is the device type; colour and glow are its
+       current state. Everything animates on transform and opacity only, which
+       the compositor handles without re-laying out the card -- a phone can run
+       a screenful of these without breaking a sweat, and the Pi never sees any
+       of it: it ships the markup once and the browser does the rest. */
+    .dev-icon {
+      width: 26px; height: 26px; flex: none; margin-top: -1px;
+      color: var(--faint);
+      transition: color .35s ease;
+    }
+    .dev-icon svg { width: 100%; height: 100%; display: block; }
+    .dev-icon.is-active { color: var(--icon, var(--on)); }
+
+    /* The filled twin of the outline, faded in behind it. */
+    .dev-icon .glow { opacity: 0; transition: opacity .4s ease; }
+    .dev-icon.is-active .glow {
+      opacity: var(--glow, .2);
+      animation: icon-breathe 4.8s ease-in-out infinite;
+    }
+    @keyframes icon-breathe {
+      0%, 100% { opacity: var(--glow, .2); }
+      50%      { opacity: calc(var(--glow, .2) * 2); }
+    }
+
+    /* Rays spring out when a lamp lights up. */
+    .dev-icon .rays {
+      opacity: 0;
+      transform: scale(.55);
+      transform-box: fill-box; transform-origin: center;
+      transition: opacity .3s ease, transform .35s cubic-bezier(.2, .9, .3, 1.5);
+    }
+    .dev-icon.is-active .rays { opacity: 1; transform: scale(1); }
+
+    /* A rocker switch actually rocks. */
+    .dev-icon .lever {
+      transform-box: fill-box; transform-origin: center;
+      transition: transform .3s cubic-bezier(.2, .9, .3, 1.5);
+    }
+    .dev-icon.is-active .lever { transform: translateY(-5.4px); }
+
+    /* A door or window swings open; hinged on the side it is drawn from. */
+    .dev-icon .panel {
+      transform-box: fill-box; transform-origin: left center;
+      transition: transform .4s cubic-bezier(.3, .8, .3, 1);
+    }
+    .dev-icon.is-active .panel { transform: scaleX(.3); }
+
+    /* Occupancy: one slow ring outward, not a strobe. */
+    .dev-icon .ping {
+      opacity: 0;
+      transform-box: fill-box; transform-origin: center;
+    }
+    .dev-icon.is-active .ping { animation: icon-ping 2.6s ease-out infinite; }
+    @keyframes icon-ping {
+      0%        { opacity: .55; transform: scale(.55); }
+      70%, 100% { opacity: 0;   transform: scale(1.1); }
+    }
+
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
     }

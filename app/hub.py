@@ -31,6 +31,11 @@ log = logging.getLogger(__name__)
 #: Dropped by the broadcaster when a subscriber stops draining its queue.
 QUEUE_LIMIT = 256
 
+#: How long to gather adapter "something changed" calls before re-reading the
+#: device list. Long enough to collapse a bridge-sized burst, short enough that
+#: a light going offline is visible about as fast as a human notices.
+RESYNC_DELAY = 0.3
+
 
 class _Pending:
     __slots__ = ("target", "started", "task")
@@ -59,10 +64,12 @@ class Hub:
         self._subscribers: set[asyncio.Queue[dict]] = set()
         self._adapter_connected = False
         self._lock = asyncio.Lock()
+        self._resync: asyncio.Task | None = None
 
     # ------------------------------------------------------------------ life
 
     async def start(self) -> None:
+        self._adapter.on_devices_changed = self._devices_changed
         await self._adapter.start(self._on_state, self._on_status)
         await self.refresh()
 
@@ -71,6 +78,11 @@ class Hub:
             if pending.task:
                 pending.task.cancel()
         self._pending.clear()
+        if self._resync is not None:
+            self._resync.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._resync
+            self._resync = None
         await self._adapter.stop()
 
     async def refresh(self) -> None:
@@ -84,6 +96,26 @@ class Hub:
             # objects and mutates `online` on them.
             await self._recorder.sync_devices([self._renamed(d) for d in devices])
         await self._broadcast(self.snapshot())
+
+    async def _devices_changed(self) -> None:
+        """An adapter says the inventory moved -- a device appeared, vanished,
+        or went offline.
+
+        Coalesced, because these arrive in bursts: a bridge losing power takes
+        every one of its devices with it, and each would otherwise be its own
+        re-discover and its own broadcast to every open dashboard.
+        """
+        if self._resync is not None and not self._resync.done():
+            return
+        self._resync = asyncio.create_task(self._resync_soon())
+
+    async def _resync_soon(self) -> None:
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.sleep(RESYNC_DELAY)
+            try:
+                await self.refresh()
+            except Exception as exc:  # noqa: BLE001 - a stale list beats a crash
+                log.warning("could not resync devices: %s", exc)
 
     def _renamed(self, device: Device) -> Device:
         entry = self._labels.get(device.id)

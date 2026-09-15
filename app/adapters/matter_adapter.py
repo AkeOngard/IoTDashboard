@@ -93,6 +93,7 @@ BRIDGED_NODE_TYPE = 0x0013
 
 class MatterAdapter:
     name = "matter"
+    on_devices_changed = None
 
     def __init__(self, url: str | None = None) -> None:
         self._url = url or settings.matter_ws_url
@@ -228,9 +229,11 @@ class MatterAdapter:
             if isinstance(data, dict):
                 self._ingest_nodes([data])
                 await self._replay_state()
+                await self._notify_devices()
         elif event == "node_removed":
             self._nodes.pop(int(data), None)
             self._rebuild()
+            await self._notify_devices()
 
     # ------------------------------------------------------------- discovery
 
@@ -356,10 +359,17 @@ class MatterAdapter:
         device_id = "matter:%d:%d" % (node_id, endpoint)
 
         if (cluster, attribute) == (C_BRIDGED_BASIC, A_REACHABLE):
+            changed = False
             for target in self._reach.get((node_id, endpoint), [device_id]):
                 device = self._devices.get(target)
-                if device is not None:
+                if device is not None and device.online != bool(raw):
                     device.online = bool(raw)
+                    changed = True
+            # Nothing else publishes `online`, so without this a device that
+            # drops off the mesh stays lit on every open dashboard until
+            # somebody reloads the page.
+            if changed:
+                await self._notify_devices()
             return
 
         cap = ATTR_TO_CAP.get((cluster, attribute))
@@ -369,6 +379,10 @@ class MatterAdapter:
         if value is None or self._on_state is None:
             return
         await self._on_state(StateEvent(device_id, cap, value))
+
+    async def _notify_devices(self) -> None:
+        if self.on_devices_changed is not None:
+            await self.on_devices_changed()
 
     async def _emit_status(self, connected: bool) -> None:
         if self._on_status is not None:
