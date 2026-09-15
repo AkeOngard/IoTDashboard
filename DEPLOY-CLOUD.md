@@ -237,6 +237,12 @@ tail -f memwatch.log                              # ดูสด (Ctrl+C ออ�
 ครบแล้วสรุปจะอยู่ท้าย `memwatch.log` (หรือสั่ง `bash memwatch.sh --report memwatch-*.csv` ทีหลังก็ได้)
 [memwatch.sh](ops/pi/memwatch.sh) ตัดสินจาก MemAvailable ที่ต่ำที่สุดที่เจอ และนับ OOM kill ของ kernel ด้วย:
 
+> **ตัวเลขจาก `docker stats` จะสูงกว่า `memwatch.sh` เสมอ อย่าเอามาเทียบกันตรง ๆ**
+> `docker stats` อ่าน `memory.current` ของ cgroup ซึ่งรวม page cache — ไฟล์ที่เคอร์เนลแคชไว้
+> และคืนได้ทันทีเมื่อระบบต้องการ ส่วน `memwatch.sh` บวก `VmRSS` คือหน่วยความจำที่โปรเซสถือจริง
+> ในเครื่องจริงเห็น matter-server เป็น 118 MiB บน `docker stats` ขณะที่ VmRSS สูงสุดตลอดวันคือ 21 MB
+> ใช้ `memwatch.sh` ตัดสินว่าเครื่องไหวไหม ใช้ `docker stats` ดูว่าเพดาน container บังคับอยู่จริงไหม
+
 | ผลที่ได้ | ความหมาย | ต่อไป |
 |---|---|---|
 | **COMFORTABLE** — ต่ำสุด ≥ 200 MB, ไม่มี OOM | Pi รับไหวสบาย | ไปข้อ 2.6 — เก็บประวัติบน Supabase ฟรี ไม่ต้องมี VM |
