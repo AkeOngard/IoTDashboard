@@ -50,9 +50,15 @@ ORDER BY 1
 RAW_TIMESCALE_SQL = _raw_sql("time_bucket($1::interval, ts)")
 RAW_PLAIN_SQL = _raw_sql("date_bin($1::interval, ts, %s)" % ORIGIN)
 
+#: Weighted by sample count, not avg(avg_value): the deadband means a quiet
+#: five minutes holds one row and a busy one holds dozens, so averaging the
+#: bucket averages equally would let the quiet stretches dominate. Measured on
+#: ten samples across three buckets, the unweighted form reads 27.42 where the
+#: raw rows say 27.25 -- and the two paths have to agree, since which one a
+#: chart uses depends only on how far back it happens to look.
 AGGREGATE_SQL = """
 SELECT extract(epoch FROM time_bucket($1::interval, bucket)) AS t,
-       avg(avg_value) AS v,
+       sum(avg_value * samples) / sum(samples) AS v,
        min(min_value) AS lo,
        max(max_value) AS hi
 FROM telemetry_5m
