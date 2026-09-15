@@ -272,10 +272,18 @@ HISTORY_RETENTION_DAYS=400
 EOF
 ```
 
-**4) สร้างตาราง** — สั่งครั้งเดียว ก่อนเปิดแอป:
+**4) สร้างตาราง** — ต้อง **build ก่อน** แล้วค่อย migrate
+
+`migrations/` ถูกคัดลอกเข้าไปใน image ตอน build คำสั่ง `run` จึงรันไฟล์ที่อยู่ใน image
+ไม่ใช่ไฟล์ที่เพิ่ง `git pull` มา ข้ามขั้น build แล้วจะเจอ
+`extension "timescaledb" is not available` จาก migration ตัวเก่า:
 
 ```bash
 cd ~/iot-control/IoTDashboard/ops/pi
+docker compose -f docker-compose.yml -f docker-compose.dashboard.yml build app
+```
+
+```bash
 docker compose -f docker-compose.yml -f docker-compose.dashboard.yml run --rm app migrate
 ```
 
@@ -291,6 +299,8 @@ skipped: 005_timescale.sql (extension not installed -- history uses plain SQL)
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dashboard.yml up -d
 ```
+
+(ไม่ต้องใส่ `--build` ซ้ำ ข้อ 4 build ไปแล้ว)
 
 **6) ตรวจว่าเข้าทางที่ถูก**:
 
@@ -312,6 +322,7 @@ curl -s localhost:8000/healthz | python3 -m json.tool
 **ถ้าต่อไม่ได้** ดูที่ `docker logs iot-app`:
 
 - `Network is unreachable` ตอนต่อ database → ใช้ direct connection (IPv6) อยู่ ให้เปลี่ยนเป็น session pooler
+- `extension "timescaledb" is not available` → image ยังเป็นตัวเก่า ย้อนไปทำข้อ 4 (`build app`) ก่อน
 - `password authentication failed` → รหัสผ่านมีอักขระพิเศษที่ยังไม่ได้ URL-encode
 - `prepared statement "asyncpg_stmt_..." does not exist` → อยู่บน transaction pooler แต่ DSN ไม่ได้ระบุพอร์ต 6543 ให้แอปเห็น ใส่พอร์ตให้ถูก
 
