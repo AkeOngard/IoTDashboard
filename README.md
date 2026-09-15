@@ -149,7 +149,9 @@ MATTER_WS_URL=ws://<ip-ของ-linux-box>:5580/ws
 | `COMMAND_TIMEOUT` | `5.0` | วินาทีที่รอ state echo ก่อนถือว่าคำสั่งล้มเหลว |
 | `TUYA_ACCESS_ID` / `_SECRET` / `_UID` | *(ว่าง)* | ใช้เมื่อ adapter เป็น `tuya`/`hybrid` |
 | `TUYA_POLL_SECONDS` | `15` | บังคับขั้นต่ำ 10 วินาที (rate limit) |
-| `DATABASE_URL` | *(ว่าง)* | เว้นว่าง = ปิด history ทั้งหมด |
+| `DATABASE_URL` | *(ว่าง)* | เว้นว่าง = ปิด history ทั้งหมด · พอร์ต 6543 (transaction pooler) แอปปิด prepared statement ให้เอง |
+| `HISTORY_RETENTION_DAYS` | `400` | ใช้เฉพาะบน Postgres ธรรมดา · บน TimescaleDB policy ใน migration 005 เป็นคนจัดการ · `0` = ไม่ลบเลย |
+| `TELEMETRY_FLUSH_SECONDS` | `2` | หน่วงก่อน INSERT เป็นชุด · ตั้งสูงขึ้นเมื่อ database อยู่ไกล |
 | `RUN_MIGRATIONS` | `0` | ปกติ container `migrate` เป็นคนรัน |
 | `DEVICE_LABELS_PATH` | `data/labels.json` | ชื่อ/ห้องที่ตั้งเองในหน้าเว็บ · เว้นว่าง = ปิดการเปลี่ยนชื่อ |
 | `PUBLIC_ORIGIN` | `http://localhost:8000` | CORS |
@@ -224,6 +226,12 @@ Tailwind ใช้ผ่าน arbitrary value (`bg-[var(--surface)]`) ดัง
 **Migration มี checksum + advisory lock** แก้ไฟล์ที่ apply ไปแล้วจะ error ทันที
 และสอง instance ที่ start พร้อมกันจะไม่ชนกัน — ไฟล์ที่ขึ้นต้นด้วย `-- migrate:no-transaction`
 จะถูกแยกทีละ statement เพราะ continuous aggregate ของ TimescaleDB รันใน transaction ไม่ได้
+
+**History ทำงานได้ทั้งบน TimescaleDB และ Postgres ธรรมดา** — แอปถามตัว database เองตอนต่อ
+ไม่ได้อ่านจาก config: มี TimescaleDB ก็ใช้ hypertable + continuous aggregate 5 นาที ไม่มีก็อ่าน
+raw ด้วย `date_bin()` แล้วลบของเก่าเองเป็นรอบ ทำให้ managed free tier (Supabase, Neon) ที่ไม่มี
+TimescaleDB ใช้ image เดียวกันได้โดยไม่ต้องแก้อะไร — migration 005 มี `-- migrate:requires-extension`
+กำกับไว้ ตัวรันจะข้ามและบันทึกว่าข้าม ถ้าวันหนึ่งย้าย dump ไปลง TimescaleDB มันจะ apply ให้เอง
 
 ## ส่วนที่ต่างจากเอกสาร
 

@@ -220,13 +220,100 @@ tail -f memwatch.log                              # ดูสด (Ctrl+C ออ�
 
 | ผลที่ได้ | ความหมาย | ต่อไป |
 |---|---|---|
-| **COMFORTABLE** — ต่ำสุด ≥ 200 MB, ไม่มี OOM | Pi รับไหวสบาย | บอกผม — จะทำโหมดเก็บประวัติลง Supabase ฟรีให้ (ไม่ต้องมี VM) |
+| **COMFORTABLE** — ต่ำสุด ≥ 200 MB, ไม่มี OOM | Pi รับไหวสบาย | ไปข้อ 2.6 — เก็บประวัติบน Supabase ฟรี ไม่ต้องมี VM |
 | **TIGHT** — 100–200 MB | ใช้ได้แต่เหลือที่น้อย | ใช้แบบไม่มีประวัติต่อไปก่อน หรือย้ายไป cloud |
 | **NOT VIABLE** — ต่ำกว่า 100 MB หรือมี OOM | Pi ไม่พอ | `docker rm -f iot-app` ให้เหลือแค่ matter-server แล้วไปข้อ 3 |
 
 ส่ง `memwatch.log` มาให้ดูได้เลยไม่ว่าผลจะออกมาแบบไหน
 
 ทั้งสอง container ตั้ง `restart: unless-stopped` ไว้ — รีบูต Pi แล้วกลับมาเองโดยไม่ต้องมี systemd unit
+
+---
+
+### 2.6 เปิดเก็บประวัติด้วย Supabase (ฟรี) — ยังไม่ต้องมี VM
+
+ทำต่อจาก 2.5 เมื่อ `memwatch.sh` ตัดสินว่า **COMFORTABLE** แล้ว ตัว Pi ยังคุมอุปกรณ์เองเหมือนเดิม
+เพิ่มแค่ปลายทางที่เก็บตัวเลขย้อนหลัง — เน็ตล่ม dashboard ก็ยังสั่งงานได้ แค่ไม่บันทึกช่วงนั้น
+
+**ข้อจำกัดของแผนฟรี ณ 15 ก.ย. 2026** — ตรวจแล้วทั้งสามข้อ เพราะทั้งสามข้อเปลี่ยนวิธีทำ:
+
+| เรื่อง | ความจริง | ผลกับเรา |
+|---|---|---|
+| ขนาด | 500 MB | ~12 MB ต่อ capability ต่อปี (คำนวณด้านล่าง) |
+| หยุดโปรเจกต์ | พักเมื่อไม่มีกิจกรรม 7 วัน | เราเขียนตลอดเวลา จึงไม่พัก |
+| TimescaleDB | ไม่มีให้ | migration 005 ถูกข้าม ระบบใช้ SQL ธรรมดาแทน — รองรับไว้แล้ว |
+
+**1) สร้างโปรเจกต์** ที่ [supabase.com](https://supabase.com) → New project → region **Singapore** (ใกล้ที่สุด)
+เก็บรหัสผ่าน database ไว้ ตอนสร้างเท่านั้นที่เห็น
+
+**2) เอา connection string** — กด **Connect** ด้านบน แล้วเลือกให้ถูกแบบ นี่คือจุดที่พลาดกันบ่อย:
+
+| แบบ | พอร์ต | ใช้กับ Pi ได้ไหม |
+|---|---|---|
+| Direct connection | 5432 | **ไม่ได้** — แผนฟรีให้เฉพาะ IPv6 ซึ่งเน็ตบ้านส่วนใหญ่ไม่มี |
+| **Session pooler** | 5432 | **ใช้ตัวนี้** — มี IPv4 และรองรับ prepared statements เต็มรูปแบบ |
+| Transaction pooler | 6543 | ได้ แต่ห้ามใช้ prepared statements — แอปตรวจพอร์ตแล้วปิดให้เอง |
+
+หน้าตาประมาณนี้ (`[REGION]` กับ `[REF]` เป็นของโปรเจกต์คุณ):
+
+```
+postgresql://postgres.[REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres
+```
+
+ถ้ารหัสผ่านมีอักขระพิเศษ (`@ : / ? # &`) ต้อง URL-encode ก่อน ไม่งั้น DSN จะถูกตีความผิด
+
+**3) ใส่ใน `ops/pi/.env`** — ต่อท้ายของเดิม:
+
+```bash
+cat >> ~/iot-control/IoTDashboard/ops/pi/.env <<'EOF'
+DATABASE_URL=postgresql://postgres.[REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres?sslmode=require
+# เก็บย้อนหลังกี่วัน — แอปลบเองเป็นรอบ เพราะไม่มี retention policy ของ TimescaleDB
+HISTORY_RETENTION_DAYS=400
+EOF
+```
+
+**4) สร้างตาราง** — สั่งครั้งเดียว ก่อนเปิดแอป:
+
+```bash
+cd ~/iot-control/IoTDashboard/ops/pi
+docker compose -f docker-compose.yml -f docker-compose.dashboard.yml run --rm app migrate
+```
+
+ต้องขึ้นแบบนี้ — บรรทัด `skipped` คือสิ่งที่ถูกต้องบน Supabase ไม่ใช่ error:
+
+```
+applied: 001_init.sql, 004_telemetry.sql
+skipped: 005_timescale.sql (extension not installed -- history uses plain SQL)
+```
+
+**5) เปิดใหม่**:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dashboard.yml up -d
+```
+
+**6) ตรวจว่าเข้าทางที่ถูก**:
+
+```bash
+curl -s localhost:8000/healthz | python3 -m json.tool
+```
+
+ต้องเห็น `"connected": true` และ `"features": {"timescaledb": null, "rollup": false}` — `null` ตรงนี้
+ถูกต้อง แปลว่ารู้ตัวว่าอยู่บน Postgres ธรรมดาและเลือก SQL ให้เองแล้ว แถบบนสุดของหน้าเว็บจะเปลี่ยนจาก
+"ไม่บันทึกประวัติ" เป็นสถานะปกติ และการ์ดจะมีปุ่มกราฟขึ้นมา
+
+กราฟจะยังว่างอยู่ราวห้านาที — ตัวบันทึกมี deadband และเต้นทุก 5 นาที จึงต้องรอให้มีจุดก่อน
+
+**ใช้เนื้อที่เท่าไร** — แต่ละ capability เขียนอย่างมาก 1 แถวต่อ 5 นาที (deadband + heartbeat) คือ
+288 แถว/วัน ≈ 105,000 แถว/ปี แถวละราว 120 ไบต์รวม index → **ราว 12 MB ต่อ capability ต่อปี**
+สวิตช์ 2 ช่องกับเซนเซอร์อุณหภูมิ/ความชื้นหนึ่งตัว = 4 capability ≈ 50 MB/ปี อยู่ใน 500 MB ได้สบาย
+ถ้าจะเพิ่มอุปกรณ์เยอะ ให้ลด `HISTORY_RETENTION_DAYS` ลง
+
+**ถ้าต่อไม่ได้** ดูที่ `docker logs iot-app`:
+
+- `Network is unreachable` ตอนต่อ database → ใช้ direct connection (IPv6) อยู่ ให้เปลี่ยนเป็น session pooler
+- `password authentication failed` → รหัสผ่านมีอักขระพิเศษที่ยังไม่ได้ URL-encode
+- `prepared statement "asyncpg_stmt_..." does not exist` → อยู่บน transaction pooler แต่ DSN ไม่ได้ระบุพอร์ต 6543 ให้แอปเห็น ใส่พอร์ตให้ถูก
 
 ---
 

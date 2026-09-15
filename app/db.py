@@ -10,10 +10,23 @@ import asyncio
 import contextlib
 import logging
 from typing import Any
+from urllib.parse import urlsplit
 
 import asyncpg
 
 log = logging.getLogger(__name__)
+
+#: Supabase's transaction pooler. It hands a different backend to every
+#: transaction, so a named prepared statement prepared on one connection is
+#: gone by the next query -- asyncpg then fails with
+#: `prepared statement "asyncpg_stmt_N" does not exist`. Setting the cache to
+#: zero makes asyncpg use unnamed statements, which the pooler allows.
+POOLED_PORTS = {6543}
+
+CAPABILITY_SQL = """
+SELECT (SELECT extversion FROM pg_extension WHERE extname = 'timescaledb') AS timescale,
+       to_regclass('public.telemetry_5m') IS NOT NULL                      AS rollup
+"""
 
 
 class Database:
@@ -21,6 +34,12 @@ class Database:
         self.dsn = dsn
         self.pool: asyncpg.Pool | None = None
         self.last_error: str | None = None
+        #: TimescaleDB version, or None on plain PostgreSQL. History picks its
+        #: SQL from this, so it is probed on every (re)connect rather than
+        #: configured -- the same image runs against both.
+        self.timescale: str | None = None
+        #: Whether the 5-minute continuous aggregate exists.
+        self.rollup = False
         self._task: asyncio.Task | None = None
         self._closing = False
 
@@ -55,16 +74,37 @@ class Database:
     async def _try_connect(self) -> bool:
         try:
             self.pool = await asyncpg.create_pool(
-                self.dsn, min_size=1, max_size=8, command_timeout=15, timeout=10
+                self.dsn,
+                min_size=1,
+                max_size=8,
+                command_timeout=15,
+                timeout=10,
+                **_pool_kwargs(self.dsn),
             )
             self.last_error = None
-            log.info("database connected")
+            await self._probe()
+            log.info(
+                "database connected (%s)",
+                "timescaledb " + self.timescale if self.timescale else "plain postgresql",
+            )
             return True
         except Exception as exc:  # noqa: BLE001 - any failure means "degraded"
             self.pool = None
             self.last_error = str(exc)
             log.warning("database unavailable: %s", exc)
             return False
+
+    async def _probe(self) -> None:
+        """Ask the server what it can do, rather than trusting configuration."""
+        try:
+            async with self.pool.acquire() as conn:  # type: ignore[union-attr]
+                row = await conn.fetchrow(CAPABILITY_SQL)
+        except Exception as exc:  # noqa: BLE001 - assume the plain path
+            log.warning("could not probe database features (%s); assuming plain SQL", exc)
+            self.timescale, self.rollup = None, False
+            return
+        self.timescale = row["timescale"] if row else None
+        self.rollup = bool(row["rollup"]) if row else False
 
     async def _keep_alive(self) -> None:
         backoff = 2.0
@@ -90,6 +130,10 @@ class Database:
 
     # ------------------------------------------------------------- shortcuts
 
+    @property
+    def features(self) -> dict[str, Any]:
+        return {"timescaledb": self.timescale, "rollup": self.rollup}
+
     async def fetch(self, query: str, *args: Any) -> list[asyncpg.Record]:
         if self.pool is None:
             raise ConnectionError(self.last_error or "database is not connected")
@@ -107,3 +151,15 @@ class Database:
             raise ConnectionError(self.last_error or "database is not connected")
         async with self.pool.acquire() as conn:
             await conn.executemany(query, rows)
+
+
+def _pool_kwargs(dsn: str) -> dict[str, Any]:
+    """Connection options a pooled DSN needs to work at all."""
+    try:
+        port = urlsplit(dsn).port
+    except ValueError:      # malformed port; let asyncpg produce the error
+        return {}
+    if port in POOLED_PORTS:
+        log.info("port %d looks like a transaction pooler; disabling prepared statements", port)
+        return {"statement_cache_size": 0}
+    return {}

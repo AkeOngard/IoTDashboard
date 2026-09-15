@@ -42,6 +42,14 @@ class Settings(BaseSettings):
     #: Local device names, kept outside the database so they survive the
     #: Pi-only deployment (DATABASE_URL empty). Set empty to disable renaming.
     device_labels_path: str = str(ROOT / "data" / "labels.json")
+    #: How long telemetry sits in memory before a batched INSERT. Worth raising
+    #: over a slow or metered link to a managed database: it trades a little
+    #: freshness in the chart for fewer round trips.
+    telemetry_flush_seconds: float = 2.0
+    #: Retention for plain PostgreSQL, where there is no TimescaleDB policy to
+    #: do it. Ignored on TimescaleDB (migration 005 owns retention there).
+    #: 0 disables pruning entirely -- the table then grows without limit.
+    history_retention_days: float = 400.0
 
     # --- http ---------------------------------------------------------------
     host: str = "0.0.0.0"

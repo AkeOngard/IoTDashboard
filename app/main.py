@@ -70,7 +70,11 @@ async def lifespan(app: FastAPI):
     app.state.db = db
     app.state.migrations = await _migrations(db)
 
-    recorder = Recorder(db)
+    recorder = Recorder(
+        db,
+        flush_interval=settings.telemetry_flush_seconds,
+        retention_days=settings.history_retention_days,
+    )
     await recorder.start()
     app.state.recorder = recorder
 
@@ -109,9 +113,11 @@ async def _migrations(db: Database) -> dict[str, Any]:
     try:
         async with db.pool.acquire() as conn:  # type: ignore[union-attr]
             if settings.run_migrations:
-                applied = await migrate_tool.up(conn)
-                if applied:
-                    log.info("applied migrations: %s", ", ".join(applied))
+                result = await migrate_tool.up(conn)
+                if result["applied"]:
+                    log.info("applied migrations: %s", ", ".join(result["applied"]))
+                if result["skipped"]:
+                    log.info("skipped migrations: %s", ", ".join(result["skipped"]))
             state = await migrate_tool.status(conn)
         if state["drift"]:
             log.error("migration checksum drift: %s", ", ".join(state["drift"]))
@@ -153,6 +159,10 @@ async def healthz() -> dict[str, Any]:
     if db.enabled and not db.available:
         database["error"] = db.last_error
     database["migrations"] = app.state.migrations
+    if db.available:
+        # Which history path is live. A chart that looks coarser than expected
+        # is usually this line saying "plain postgresql, no rollup".
+        database["features"] = db.features
 
     backends = getattr(hub.adapter, "backends", None)
     degraded = not snapshot["connected"] or (db.enabled and not db.available)

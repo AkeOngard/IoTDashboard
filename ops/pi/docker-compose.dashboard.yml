@@ -22,8 +22,16 @@ services:
     environment:
       IOT_ADAPTER: matter
       MATTER_WS_URL: ws://127.0.0.1:5580/ws
-      # Empty = history off. The app runs live-only and says so in the header.
-      DATABASE_URL: ""
+      # Empty = history off; the app runs live-only and says so in the header.
+      # Set it in .env to a managed Postgres (see DEPLOY-CLOUD.md 2.6) and the
+      # charts turn on. There is no TimescaleDB on a free tier, so migration
+      # 005 is skipped and history reads raw rows with date_bin().
+      DATABASE_URL: ${DATABASE_URL:-}
+      # Retention is the app's job without a TimescaleDB policy to do it.
+      HISTORY_RETENTION_DAYS: ${HISTORY_RETENTION_DAYS:-400}
+      # Longer than the local default: every flush is a round trip over the
+      # internet, and the chart does not need two-second freshness.
+      TELEMETRY_FLUSH_SECONDS: ${TELEMETRY_FLUSH_SECONDS:-15}
       HOST: ${HOST:-0.0.0.0}
       PORT: ${PORT:-8000}
       # No login exists yet (phase 4), so the Host check is what stops a web

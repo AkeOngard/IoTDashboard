@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import logging
 import time
+from datetime import timedelta
 from typing import Any
 
 from app.db import Database
@@ -66,33 +67,63 @@ WHERE ts > now() - INTERVAL '7 days'
 ORDER BY device_id, capability, ts DESC
 """
 
+#: Retention on plain PostgreSQL, where there is no TimescaleDB policy to do
+#: it. Deleted in batches so the first sweep after a long gap cannot hold a
+#: long lock or blow up the WAL on a small managed instance.
+PRUNE_SQL = """
+DELETE FROM telemetry
+WHERE ctid IN (
+    SELECT ctid FROM telemetry WHERE ts < now() - $1::interval LIMIT $2
+)
+"""
+PRUNE_BATCH = 5000
+
 
 class Recorder:
-    def __init__(self, db: Database, flush_interval: float = 2.0, max_buffer: int = 5000) -> None:
+    def __init__(
+        self,
+        db: Database,
+        flush_interval: float = 2.0,
+        max_buffer: int = 5000,
+        retention_days: float = 0.0,
+        prune_interval: float = 6 * 3600.0,
+    ) -> None:
         self._db = db
         self._flush_interval = flush_interval
         self._max_buffer = max_buffer
+        self._retention_days = retention_days
+        self._prune_interval = prune_interval
         self._buffer: list[tuple[float, str, str, float]] = []
         self._last_written: dict[tuple[str, Capability], tuple[float, float]] = {}
-        self._task: asyncio.Task | None = None
+        self._tasks: list[asyncio.Task] = []
         self.written = 0
         self.dropped = 0
+        self.pruned = 0
 
     async def start(self) -> None:
-        if self._db.enabled:
-            self._task = asyncio.create_task(self._flusher())
+        if not self._db.enabled:
+            return
+        self._tasks.append(asyncio.create_task(self._flusher()))
+        if self._retention_days > 0:
+            self._tasks.append(asyncio.create_task(self._pruner()))
 
     async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
+        for task in self._tasks:
+            task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
-                await self._task
+                await task
+        self._tasks.clear()
         with contextlib.suppress(Exception):
             await self._flush()
 
     @property
     def stats(self) -> dict[str, Any]:
-        return {"written": self.written, "dropped": self.dropped, "buffered": len(self._buffer)}
+        stats = {"written": self.written, "dropped": self.dropped, "buffered": len(self._buffer)}
+        # Only meaningful where this process owns retention: history on, and no
+        # TimescaleDB policy doing the job instead.
+        if self._db.enabled and self._retention_days > 0 and not self._db.timescale:
+            stats["pruned"] = self.pruned
+        return stats
 
     # ------------------------------------------------------------------ write
 
@@ -153,6 +184,36 @@ class Recorder:
             await asyncio.sleep(self._flush_interval)
             with contextlib.suppress(Exception):
                 await self._flush()
+
+    # -------------------------------------------------------------- retention
+
+    async def _pruner(self) -> None:
+        # A short first delay so a restart loop cannot turn into a delete loop,
+        # but soon enough that a box left off for months tidies up on boot.
+        await asyncio.sleep(60)
+        while True:
+            with contextlib.suppress(Exception):
+                await self.prune()
+            await asyncio.sleep(self._prune_interval)
+
+    async def prune(self) -> int:
+        """Drop telemetry past the retention window. No-op on TimescaleDB,
+        which runs its own retention policy from migration 005."""
+        if not self._db.available or self._db.timescale or self._retention_days <= 0:
+            return 0
+        window = timedelta(days=self._retention_days)
+        removed = 0
+        while True:
+            status = await self._db.execute(PRUNE_SQL, window, PRUNE_BATCH)
+            # asyncpg returns the tag, e.g. "DELETE 5000".
+            count = int(status.rsplit(" ", 1)[-1]) if status.startswith("DELETE") else 0
+            removed += count
+            if count < PRUNE_BATCH:
+                break
+        if removed:
+            self.pruned += removed
+            log.info("pruned %d telemetry rows older than %g days", removed, self._retention_days)
+        return removed
 
     async def _flush(self) -> None:
         if not self._buffer:

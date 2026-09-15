@@ -14,6 +14,12 @@ Properties the doc calls for:
                            alongside the database container
   * -- migrate:no-transaction directive for statements TimescaleDB refuses to
     run inside a transaction block (continuous aggregates)
+  * -- migrate:requires-extension NAME to skip a migration the server cannot
+    run. Managed Postgres (Supabase, Neon) has no TimescaleDB, so the
+    hypertable and the continuous aggregate simply do not happen there and
+    history falls back to plain SQL. A skipped migration is recorded as
+    skipped, not applied, and is re-evaluated on every run -- restore the
+    same dump onto a TimescaleDB server and it applies itself.
 """
 from __future__ import annotations
 
@@ -36,18 +42,25 @@ log = logging.getLogger("migrate")
 
 NAME_RE = re.compile(r"^(\d+)_(.+)\.sql$")
 NO_TRANSACTION = "-- migrate:no-transaction"
+REQUIRES_EXTENSION = re.compile(r"^--\s*migrate:requires-extension\s+(\w+)\s*$", re.M)
 
 #: Any 64-bit constant works; it just has to be the same in every instance.
 ADVISORY_LOCK_KEY = 0x104D1657A7E
 
-BOOTSTRAP = """
-CREATE TABLE IF NOT EXISTS schema_migrations (
-    version     INTEGER PRIMARY KEY,
-    name        TEXT        NOT NULL,
-    checksum    TEXT        NOT NULL,
-    applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+BOOTSTRAP = (
+    """
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+        version     INTEGER PRIMARY KEY,
+        name        TEXT        NOT NULL,
+        checksum    TEXT        NOT NULL,
+        applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    # Added later; existing databases get it here rather than in a migration,
+    # since the runner needs the column before it can read its own table.
+    "ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS skipped BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS skip_reason TEXT",
 )
-"""
 
 
 class MigrationError(RuntimeError):
@@ -62,6 +75,8 @@ class Migration:
     sql: str
     checksum: str
     transactional: bool
+    #: Extension that must be installed, or None.
+    requires_extension: str | None
 
 
 def discover(directory: Path = MIGRATIONS_DIR) -> list[Migration]:
@@ -79,6 +94,7 @@ def discover(directory: Path = MIGRATIONS_DIR) -> list[Migration]:
                 sql=sql,
                 checksum=hashlib.sha256(sql.encode("utf-8")).hexdigest(),
                 transactional=NO_TRANSACTION not in "\n".join(sql.splitlines()[:3]),
+                requires_extension=_required_extension(sql),
             )
         )
     versions = [m.version for m in migrations]
@@ -86,6 +102,14 @@ def discover(directory: Path = MIGRATIONS_DIR) -> list[Migration]:
     if duplicates:
         raise MigrationError("duplicate migration versions: " + repr(duplicates))
     return migrations
+
+
+def _required_extension(sql: str) -> str | None:
+    """Read the directive out of the file's header comment."""
+    return next(
+        (m.group(1) for m in (REQUIRES_EXTENSION.search(line) for line in sql.splitlines()[:6]) if m),
+        None,
+    )
 
 
 def split_statements(sql: str) -> list[str]:
@@ -159,18 +183,34 @@ async def connect(dsn: str, wait_seconds: float = 60.0) -> asyncpg.Connection:
             delay = min(delay * 1.5, 5.0)
 
 
-async def _applied(conn: asyncpg.Connection) -> dict[int, tuple[str, str]]:
-    await conn.execute(BOOTSTRAP)
-    rows = await conn.fetch("SELECT version, name, checksum FROM schema_migrations")
-    return {row["version"]: (row["name"], row["checksum"]) for row in rows}
+@dataclass(frozen=True)
+class Applied:
+    name: str
+    checksum: str
+    skipped: bool
 
 
-def _verify(migrations: list[Migration], known: dict[int, tuple[str, str]]) -> list[str]:
+async def _applied(conn: asyncpg.Connection) -> dict[int, Applied]:
+    for statement in BOOTSTRAP:
+        await conn.execute(statement)
+    rows = await conn.fetch("SELECT version, name, checksum, skipped FROM schema_migrations")
+    return {
+        row["version"]: Applied(row["name"], row["checksum"], row["skipped"]) for row in rows
+    }
+
+
+def _verify(migrations: list[Migration], known: dict[int, Applied]) -> list[str]:
     drift: list[str] = []
     for migration in migrations:
-        if migration.version in known and known[migration.version][1] != migration.checksum:
+        previous = known.get(migration.version)
+        # A skipped migration never ran, so editing it breaks nothing.
+        if previous and not previous.skipped and previous.checksum != migration.checksum:
             drift.append(migration.path.name)
     return drift
+
+
+async def _installed_extensions(conn: asyncpg.Connection) -> set[str]:
+    return {row["extname"] for row in await conn.fetch("SELECT extname FROM pg_extension")}
 
 
 async def up(conn: asyncpg.Connection, directory: Path = MIGRATIONS_DIR) -> list[str]:
@@ -185,10 +225,25 @@ async def up(conn: asyncpg.Connection, directory: Path = MIGRATIONS_DIR) -> list
                 "checksum drift in " + ", ".join(drift)
                 + " -- an applied migration was edited; add a new one instead"
             )
+        installed = await _installed_extensions(conn)
         applied: list[str] = []
+        skipped: list[str] = []
         for migration in migrations:
-            if migration.version in known:
+            previous = known.get(migration.version)
+            if previous is not None and not previous.skipped:
                 continue
+
+            needs = migration.requires_extension
+            if needs and needs not in installed:
+                reason = "%s extension is not installed" % needs
+                # Recorded, not applied: a later run on a server that does have
+                # the extension picks it up without any manual step.
+                if previous is None or previous.checksum != migration.checksum:
+                    await _record(conn, migration, skipped=True, reason=reason)
+                log.info("skipping %s -- %s", migration.path.name, reason)
+                skipped.append(migration.path.name)
+                continue
+
             log.info("applying %s", migration.path.name)
             if migration.transactional:
                 async with conn.transaction():
@@ -202,27 +257,55 @@ async def up(conn: asyncpg.Connection, directory: Path = MIGRATIONS_DIR) -> list
                     await conn.execute(statement)
                 await _record(conn, migration)
             applied.append(migration.path.name)
-        return applied
+        return {"applied": applied, "skipped": skipped}
     finally:
         await conn.execute("SELECT pg_advisory_unlock($1)", ADVISORY_LOCK_KEY)
 
 
-async def _record(conn: asyncpg.Connection, migration: Migration) -> None:
+async def _record(
+    conn: asyncpg.Connection,
+    migration: Migration,
+    skipped: bool = False,
+    reason: str | None = None,
+) -> None:
     await conn.execute(
-        "INSERT INTO schema_migrations (version, name, checksum) VALUES ($1, $2, $3)",
+        """
+        INSERT INTO schema_migrations (version, name, checksum, skipped, skip_reason)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (version) DO UPDATE SET
+            name = EXCLUDED.name,
+            checksum = EXCLUDED.checksum,
+            skipped = EXCLUDED.skipped,
+            skip_reason = EXCLUDED.skip_reason,
+            applied_at = now()
+        """,
         migration.version,
         migration.name,
         migration.checksum,
+        skipped,
+        reason,
     )
 
 
 async def status(conn: asyncpg.Connection, directory: Path = MIGRATIONS_DIR) -> dict:
     migrations = discover(directory)
     known = await _applied(conn)
-    pending = [m.path.name for m in migrations if m.version not in known]
+    installed = await _installed_extensions(conn)
+
+    pending: list[str] = []
+    skipped: list[str] = []
+    for migration in migrations:
+        previous = known.get(migration.version)
+        if previous is not None and not previous.skipped:
+            continue
+        needs = migration.requires_extension
+        # Not pending, just not applicable here -- and saying so keeps the app
+        # from warning about migrations that will never run on this server.
+        (skipped if needs and needs not in installed else pending).append(migration.path.name)
     return {
-        "applied": sorted(known),
+        "applied": sorted(v for v, a in known.items() if not a.skipped),
         "pending": pending,
+        "skipped": skipped,
         "drift": _verify(migrations, known),
         "up_to_date": not pending,
     }
@@ -264,12 +347,18 @@ async def main() -> int:
     conn = await connect(settings.database_url)
     try:
         if args.command == "up":
-            applied = await up(conn)
-            print("applied: " + ", ".join(applied) if applied else "already up to date")
+            result = await up(conn)
+            print("applied: " + ", ".join(result["applied"]) if result["applied"]
+                  else "already up to date")
+            if result["skipped"]:
+                print("skipped: " + ", ".join(result["skipped"])
+                      + " (extension not installed -- history uses plain SQL)")
         elif args.command == "status":
             state = await status(conn)
             print("applied :", ", ".join("%03d" % v for v in state["applied"]) or "none")
             print("pending :", ", ".join(state["pending"]) or "none")
+            if state["skipped"]:
+                print("skipped :", ", ".join(state["skipped"]))
             if state["drift"]:
                 print("DRIFT   :", ", ".join(state["drift"]))
                 return 1
