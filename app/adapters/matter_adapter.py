@@ -259,11 +259,7 @@ class MatterAdapter:
                 if device is not None:
                     devices[device.id] = device
                     route[device.id] = (node_id, endpoint)
-                    source = endpoint
-                    if endpoint in parents and "%d/%d/%d" % (
-                        endpoint, C_BRIDGED_BASIC, A_REACHABLE
-                    ) not in attributes:
-                        source = parents[endpoint][0]
+                    source = _reach_source(attributes, endpoint, parents.get(endpoint))
                     reach.setdefault((node_id, source), []).append(device.id)
         self._devices = devices
         self._route = route
@@ -507,14 +503,25 @@ def _name_for(
     return "%s %d" % (base, siblings.index(endpoint) + 1)
 
 
+def _reach_source(
+    attributes: dict[str, Any], endpoint: int, parent: tuple[int, list[int]] | None
+) -> int:
+    """Which endpoint's Reachable speaks for this device.
+
+    Reading the value and routing later updates have to agree on this, or a
+    device is initialised from its parent and then never hears the parent
+    change -- so both go through here.
+    """
+    own = attributes.get("%d/%d/%d" % (endpoint, C_BRIDGED_BASIC, A_REACHABLE))
+    return endpoint if own is not None or parent is None else parent[0]
+
+
 def _reachable(
     attributes: dict[str, Any], endpoint: int, parent: tuple[int, list[int]] | None
 ) -> Any:
     """Reachable lives on the bridged-node endpoint, not on its parts."""
-    own = attributes.get("%d/%d/%d" % (endpoint, C_BRIDGED_BASIC, A_REACHABLE))
-    if own is not None or parent is None:
-        return own
-    return attributes.get("%d/%d/%d" % (parent[0], C_BRIDGED_BASIC, A_REACHABLE))
+    source = _reach_source(attributes, endpoint, parent)
+    return attributes.get("%d/%d/%d" % (source, C_BRIDGED_BASIC, A_REACHABLE))
 
 
 def _decode(cap: Capability, raw: Any) -> Any:

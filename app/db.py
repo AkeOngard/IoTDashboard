@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -40,6 +41,10 @@ class Database:
         self.timescale: str | None = None
         #: Whether the 5-minute continuous aggregate exists.
         self.rollup = False
+        #: Whether the two above are knowledge rather than a guess. A failed
+        #: probe leaves them at their defaults, and "plain PostgreSQL" is a
+        #: licence to delete rows -- so anything destructive checks this first.
+        self.probed = False
         self._task: asyncio.Task | None = None
         self._closing = False
 
@@ -82,7 +87,7 @@ class Database:
                 **_pool_kwargs(self.dsn),
             )
             self.last_error = None
-            await self._probe()
+            await self.probe()
             log.info(
                 "database connected (%s)",
                 "timescaledb " + self.timescale if self.timescale else "plain postgresql",
@@ -94,17 +99,25 @@ class Database:
             log.warning("database unavailable: %s", exc)
             return False
 
-    async def _probe(self) -> None:
-        """Ask the server what it can do, rather than trusting configuration."""
+    async def probe(self) -> None:
+        """Ask the server what it can do, rather than trusting configuration.
+
+        Call again after anything that can change the answer -- applying
+        migrations creates the continuous aggregate, and a probe taken before
+        that would read a stale False for the rest of the process.
+        """
+        if self.pool is None:
+            return
         try:
-            async with self.pool.acquire() as conn:  # type: ignore[union-attr]
+            async with self.pool.acquire() as conn:
                 row = await conn.fetchrow(CAPABILITY_SQL)
-        except Exception as exc:  # noqa: BLE001 - assume the plain path
-            log.warning("could not probe database features (%s); assuming plain SQL", exc)
-            self.timescale, self.rollup = None, False
+        except Exception as exc:  # noqa: BLE001 - stay honest about not knowing
+            log.warning("could not probe database features: %s", exc)
+            self.probed = False
             return
         self.timescale = row["timescale"] if row else None
         self.rollup = bool(row["rollup"]) if row else False
+        self.probed = True
 
     async def _keep_alive(self) -> None:
         backoff = 2.0
@@ -122,6 +135,8 @@ class Database:
                     with contextlib.suppress(Exception):
                         await self.pool.close()  # type: ignore[union-attr]
                     self.pool = None
+                    # We may come back to a different server entirely.
+                    self.probed = False
                     self.last_error = str(exc)
             if await self._try_connect():
                 backoff = 2.0
@@ -132,7 +147,7 @@ class Database:
 
     @property
     def features(self) -> dict[str, Any]:
-        return {"timescaledb": self.timescale, "rollup": self.rollup}
+        return {"timescaledb": self.timescale, "rollup": self.rollup, "probed": self.probed}
 
     async def fetch(self, query: str, *args: Any) -> list[asyncpg.Record]:
         if self.pool is None:
@@ -153,12 +168,21 @@ class Database:
             await conn.executemany(query, rows)
 
 
-def _pool_kwargs(dsn: str) -> dict[str, Any]:
-    """Connection options a pooled DSN needs to work at all."""
+def _dsn_port(dsn: str) -> int | None:
+    """asyncpg takes both URL and libpq keyword DSNs; read the port from either."""
     try:
         port = urlsplit(dsn).port
     except ValueError:      # malformed port; let asyncpg produce the error
-        return {}
+        return None
+    if port is not None:
+        return port
+    match = re.search(r"(?:^|\s)port\s*=\s*'?(\d+)'?", dsn)
+    return int(match.group(1)) if match else None
+
+
+def _pool_kwargs(dsn: str) -> dict[str, Any]:
+    """Connection options a pooled DSN needs to work at all."""
+    port = _dsn_port(dsn)
     if port in POOLED_PORTS:
         log.info("port %d looks like a transaction pooler; disabling prepared statements", port)
         return {"statement_cache_size": 0}

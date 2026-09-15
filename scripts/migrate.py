@@ -213,7 +213,9 @@ async def _installed_extensions(conn: asyncpg.Connection) -> set[str]:
     return {row["extname"] for row in await conn.fetch("SELECT extname FROM pg_extension")}
 
 
-async def up(conn: asyncpg.Connection, directory: Path = MIGRATIONS_DIR) -> list[str]:
+async def up(
+    conn: asyncpg.Connection, directory: Path = MIGRATIONS_DIR
+) -> dict[str, list[str]]:
     migrations = discover(directory)
     # Serialise concurrent starts; released automatically when the session ends.
     await conn.execute("SELECT pg_advisory_lock($1)", ADVISORY_LOCK_KEY)

@@ -70,10 +70,18 @@ ORDER BY device_id, capability, ts DESC
 #: Retention on plain PostgreSQL, where there is no TimescaleDB policy to do
 #: it. Deleted in batches so the first sweep after a long gap cannot hold a
 #: long lock or blow up the WAL on a small managed instance.
+#:
+#: ONLY is load-bearing, not decoration. ctid is unique within one heap, and a
+#: hypertable spreads rows over chunk tables that each start again at (0,1) --
+#: so without it, an IN-list of old ctids also matches *recent* rows in other
+#: chunks. Measured on timescaledb 2.30.0: ten 40-day-old rows and ten from
+#: today, and the unqualified form reported `DELETE 20`. ONLY confines both
+#: halves to the parent table, which on a hypertable holds nothing, making this
+#: an inert no-op there and leaving retention to the policy that owns it.
 PRUNE_SQL = """
-DELETE FROM telemetry
+DELETE FROM ONLY telemetry
 WHERE ctid IN (
-    SELECT ctid FROM telemetry WHERE ts < now() - $1::interval LIMIT $2
+    SELECT ctid FROM ONLY telemetry WHERE ts < now() - $1::interval LIMIT $2
 )
 """
 PRUNE_BATCH = 5000
@@ -199,7 +207,9 @@ class Recorder:
     async def prune(self) -> int:
         """Drop telemetry past the retention window. No-op on TimescaleDB,
         which runs its own retention policy from migration 005."""
-        if not self._db.available or self._db.timescale or self._retention_days <= 0:
+        # `probed` and not `timescale`: a failed probe reports None, which must
+        # not be read as "plain PostgreSQL, go ahead and delete".
+        if not self._db.probed or self._db.timescale or self._retention_days <= 0:
             return 0
         window = timedelta(days=self._retention_days)
         removed = 0

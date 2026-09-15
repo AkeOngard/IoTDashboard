@@ -69,6 +69,9 @@ async def lifespan(app: FastAPI):
     await db.start()
     app.state.db = db
     app.state.migrations = await _migrations(db)
+    # Migrations can create the continuous aggregate, which the probe during
+    # db.start() ran too early to see. Ask again now that the schema is final.
+    await db.probe()
 
     recorder = Recorder(
         db,

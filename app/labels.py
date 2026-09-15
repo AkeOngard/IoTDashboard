@@ -26,6 +26,11 @@ MAX_LENGTH = 60
 MAX_ENTRIES = 1000
 
 
+def _entry(name: Any, room: Any) -> dict[str, str]:
+    """A stored entry holds only the fields that carry an actual override."""
+    return {k: v for k, v in (("name", clean(name)), ("room", clean(room))) if v}
+
+
 def clean(value: Any) -> str:
     """Trim, drop control characters, and cut to a length a card can show."""
     text = "" if value is None else str(value)
@@ -63,7 +68,7 @@ class LabelStore:
         log.info("loaded %d device labels from %s", len(self._entries), self.path)
 
     def _set(self, device_id: str, name: Any, room: Any) -> dict[str, str]:
-        entry = {k: v for k, v in (("name", clean(name)), ("room", clean(room))) if v}
+        entry = _entry(name, room)
         if entry:
             self._entries[device_id] = entry
         else:
@@ -93,17 +98,32 @@ class LabelStore:
             current["name"] = name
         if room is not None:
             current["room"] = room
-        if device_id not in self._entries and len(self._entries) >= MAX_ENTRIES:
+        entry = _entry(current.get("name"), current.get("room"))
+
+        # Only an entry that actually lands counts against the cap; clearing an
+        # override, or a no-op on an unknown device, must not be refused.
+        if entry and device_id not in self._entries and len(self._entries) >= MAX_ENTRIES:
             raise ValueError("too many stored labels (%d)" % MAX_ENTRIES)
-        entry = self._set(device_id, current.get("name"), current.get("room"))
-        self.save()
+
+        entries = dict(self._entries)
+        if entry:
+            entries[device_id] = entry
+        else:
+            entries.pop(device_id, None)
+        # Disk first: a rename that never reached the file must not linger in
+        # memory, where it would show on every dashboard until the next restart
+        # quietly took it away again.
+        self.save(entries)
+        self._entries = entries
         return entry
 
-    def save(self) -> None:
+    def save(self, entries: dict[str, dict[str, str]] | None = None) -> None:
         if self.path is None:
             return
         payload = json.dumps(
-            {"version": 1, "devices": self._entries}, ensure_ascii=False, indent=2
+            {"version": 1, "devices": self._entries if entries is None else entries},
+            ensure_ascii=False,
+            indent=2,
         )
         temp = self.path.with_name(self.path.name + ".tmp")
         try:

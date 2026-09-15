@@ -346,9 +346,15 @@ function dashboard() {
       const room = this.draft.room.trim();
       // Sending the hub's own name back would store a pointless override that
       // then stops tracking the hub; treat "unchanged" as "no override".
+      // hub_name only appears once an override exists, so on a device that has
+      // none the hub's name is the one already on the card -- comparing against
+      // hub_name alone would miss the commonest edit of all: set a room, leave
+      // the name be.
+      const hubName = device.hub_name ?? device.name ?? '';
+      const hubRoom = device.hub_room ?? device.room ?? '';
       const body = {
-        name: name === (device.hub_name || '') ? '' : name,
-        room: room === (device.hub_room || '') ? '' : room,
+        name: name === hubName ? '' : name,
+        room: room === hubRoom ? '' : room,
       };
       this.saving = true;
       try {
