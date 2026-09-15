@@ -337,27 +337,30 @@ export ข้อมูลเองเป็นประจำและเก็�
 
 `scripts/backup.sh` ชี้ไป Supabase ได้ตรง ๆ เพราะมันอ่าน `DATABASE_URL` ที่ตั้งไว้แล้ว
 
-**ลองครั้งแรก** บน Pi:
+**เช็คเวอร์ชันของเซิร์ฟเวอร์ก่อน** — ตัวเลขนี้ต้องตรงกับ image ที่จะใช้ dump:
 
 ```bash
-cd ~/iot-control/IoTDashboard && bash scripts/backup.sh
+docker exec iot-app psql "$DATABASE_URL" -tAc "SHOW server_version"
+```
+
+**สั่งสำรอง** — Raspberry Pi OS ไม่ได้ติดตั้ง `pg_dump` มาให้ และถึงติดตั้งก็ได้เวอร์ชัน 15
+ซึ่ง dump เซิร์ฟเวอร์ 17 ไม่ได้ (pg_dump ปฏิเสธเซิร์ฟเวอร์ที่ใหม่กว่าตัวเอง) ใช้ผ่าน container แทน
+เปลี่ยน `17` เป็นเลขที่ได้จากคำสั่งข้างบน:
+
+```bash
+cd ~/iot-control/IoTDashboard && PG_EXEC="docker run --rm -i postgres:17" bash scripts/backup.sh
 ```
 
 ได้ไฟล์ใน `ops/backups/iot-<วันเวลา>.dump` และลบไฟล์เก่ากว่า 30 วันให้เอง (ตั้งค่าได้ที่
-`RETENTION_DAYS`)
+`RETENTION_DAYS`) สคริปต์อ่าน `DATABASE_URL` จาก `ops/pi/.env` ให้เอง ไม่ต้องส่งเข้าไป
 
-**ถ้าขึ้นว่า pg_dump เวอร์ชันเก่ากว่าเซิร์ฟเวอร์** — เกิดแน่ถ้าโปรเจกต์คุณเป็น PostgreSQL 17
-เพราะ Raspberry Pi OS มี client เวอร์ชัน 15 และ pg_dump ปฏิเสธการ dump เซิร์ฟเวอร์ที่ใหม่กว่าตัวเอง
-สคริปต์จะตรวจให้ก่อนแล้วบอกคำสั่งที่ถูกต้องมาเลย หน้าตาแบบนี้:
-
-```bash
-PG_EXEC="docker run --rm -i postgres:17" bash scripts/backup.sh
-```
+ถ้าเผลอสั่งโดยไม่มี `PG_EXEC` หรือใช้เวอร์ชันผิด สคริปต์จะหยุดแล้วบอกคำสั่งที่ถูกต้องมาให้ ไม่ปล่อยให้
+ได้ไฟล์ครึ่ง ๆ
 
 **ตั้งให้ทำเองทุกวัน** — ตี 3:
 
 ```bash
-( crontab -l 2>/dev/null; echo "0 3 * * * cd \$HOME/iot-control/IoTDashboard && bash scripts/backup.sh >> ops/backups/backup.log 2>&1" ) | crontab -
+( crontab -l 2>/dev/null; echo "0 3 * * * cd \$HOME/iot-control/IoTDashboard && PG_EXEC='docker run --rm -i postgres:17' bash scripts/backup.sh >> ops/backups/backup.log 2>&1" ) | crontab -
 ```
 
 ไฟล์อยู่บน SD card ของ Pi ซึ่งก็พังได้เหมือนกัน — **คัดลอกออกไปที่อื่นด้วย** อย่างน้อยเดือนละครั้ง
@@ -366,7 +369,7 @@ PG_EXEC="docker run --rm -i postgres:17" bash scripts/backup.sh
 **กู้คืน** — ต้องลงฐานข้อมูลที่ว่างเปล่า สคริปต์จะปฏิเสธถ้าปลายทางมีตารางอยู่แล้ว:
 
 ```bash
-DATABASE_URL="<dsn ของฐานใหม่>" bash scripts/restore.sh ops/backups/iot-<วันเวลา>.dump
+DATABASE_URL="<dsn ของฐานใหม่>" PG_EXEC="docker run --rm -i postgres:17" bash scripts/restore.sh ops/backups/iot-<วันเวลา>.dump
 ```
 
 ทดสอบวงจร backup → restore แล้วทั้งบน PostgreSQL ธรรมดาและ TimescaleDB: จำนวนแถว telemetry

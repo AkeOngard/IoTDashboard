@@ -22,11 +22,37 @@ cd "$(dirname "$0")/.."
 dump="${1:?usage: restore.sh <file.dump>}"
 [ -f "$dump" ] || { echo "no such file: $dump" >&2; exit 1; }
 
-if [ -z "${DATABASE_URL:-}" ] && [ -f .env ]; then
-  set -a; . ./.env; set +a
+# The env file sits wherever the deployment does: the repo root for the full
+# compose stack, ops/pi/.env for the Pi-only one that keeps history in a
+# managed database.
+if [ -z "${DATABASE_URL:-}" ]; then
+  for env_file in .env ops/pi/.env; do
+    [ -f "$env_file" ] || continue
+    set -a; . "./$env_file"; set +a
+    if [ -n "${DATABASE_URL:-}" ]; then break; fi
+  done
 fi
-: "${DATABASE_URL:?DATABASE_URL is not set (and no .env to read it from)}"
+: "${DATABASE_URL:?DATABASE_URL is not set, and neither .env nor ops/pi/.env defines it}"
 PG_EXEC="${PG_EXEC:-}"
+
+# Nothing to dump with? Say so usefully. Raspberry Pi OS does not install the
+# PostgreSQL client, and the deployment that needs this most -- Pi plus a
+# managed database -- is exactly the one without it. Docker is already there.
+missing_client() {
+  echo "$1 is not installed on this host." >&2
+  echo >&2
+  echo "Run one from a container instead, matching your server's major version:" >&2
+  echo >&2
+  echo "  PG_EXEC=\"docker run --rm -i postgres:17\" bash $2" >&2
+  echo >&2
+  echo "Check the version with:" >&2
+  echo "  docker exec iot-app psql \"\$DATABASE_URL\" -tAc \"SHOW server_version\"" >&2
+  exit 1
+}
+
+if [ -z "$PG_EXEC" ] && ! command -v pg_restore >/dev/null 2>&1; then
+  missing_client pg_restore "scripts/restore.sh $dump"
+fi
 
 # shellcheck disable=SC2086
 psql_() { $PG_EXEC psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -qAt "$@"; }
