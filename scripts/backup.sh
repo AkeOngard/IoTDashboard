@@ -30,6 +30,22 @@ mkdir -p "$BACKUP_DIR"
 out="$BACKUP_DIR/iot-$STAMP.dump"
 partial="$out.partial"
 
+# pg_dump refuses a server newer than itself, and the failure message says
+# nothing about what to do. Managed Postgres moves ahead of whatever client the
+# host has -- Raspberry Pi OS ships 15 -- so check first and name the fix.
+server_num=$($PG_EXEC psql "$DATABASE_URL" -tAc "SHOW server_version_num" 2>/dev/null | tr -dc '0-9' || true)
+client_major=$($PG_EXEC pg_dump --version 2>/dev/null | sed -n 's/.*PostgreSQL) \([0-9][0-9]*\).*/\1/p' || true)
+if [ -n "$server_num" ] && [ -n "$client_major" ] &&
+   [ "$(( server_num / 10000 ))" -gt "$client_major" ]; then
+  server_major=$(( server_num / 10000 ))
+  echo "pg_dump is version $client_major but the server is $server_major;" >&2
+  echo "pg_dump will not dump a server newer than itself. Run a matching one:" >&2
+  echo >&2
+  echo "  PG_EXEC=\"docker run --rm -i postgres:$server_major\" bash scripts/backup.sh" >&2
+  echo >&2
+  exit 1
+fi
+
 echo "==> pg_dump -> $out"
 # Stream to stdout so the file lands on the host even when pg_dump runs inside
 # the database container. Write to .partial first: a dump cut short by a full

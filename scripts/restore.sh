@@ -12,7 +12,9 @@
 #
 # TimescaleDB requires timescaledb_pre_restore() / timescaledb_post_restore()
 # around pg_restore; without them its catalog and background jobs end up
-# inconsistent with the restored chunks.
+# inconsistent with the restored chunks. On a plain PostgreSQL target -- a
+# managed free tier, which is where history lives when there is no VM -- those
+# hooks do not exist and asking for them aborts the restore before it starts.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -36,25 +38,46 @@ if [ "$tables" != "0" ]; then
   exit 1
 fi
 
-echo "==> preparing TimescaleDB for restore"
-psql_ -c "CREATE EXTENSION IF NOT EXISTS timescaledb"
-psql_ -c "SELECT timescaledb_pre_restore()" >/dev/null
+# What can the target actually do, and what does the dump need?
+target_ts=$(psql_ -c "SELECT count(*) FROM pg_available_extensions WHERE name = 'timescaledb'")
+# shellcheck disable=SC2086
+dump_ts=$($PG_EXEC pg_restore -l < "$dump" 2>/dev/null | grep -ci 'EXTENSION - timescaledb' || true)
+
+if [ "$dump_ts" != "0" ] && [ "$target_ts" = "0" ]; then
+  echo "refusing to restore: this dump was taken from a TimescaleDB server," >&2
+  echo "but the target has no timescaledb extension available. Its hypertable" >&2
+  echo "chunks would have nowhere to land. Restore onto TimescaleDB instead." >&2
+  exit 1
+fi
+
+if [ "$target_ts" != "0" ]; then
+  echo "==> preparing TimescaleDB for restore"
+  psql_ -c "CREATE EXTENSION IF NOT EXISTS timescaledb"
+  psql_ -c "SELECT timescaledb_pre_restore()" >/dev/null
+else
+  echo "==> plain PostgreSQL target; no TimescaleDB hooks needed"
+fi
 
 echo "==> pg_restore $dump"
-# Not --exit-on-error: the dump re-issues CREATE EXTENSION timescaledb, which
-# fails harmlessly because the hook above needed the extension first.
+# Not --exit-on-error: a TimescaleDB dump re-issues CREATE EXTENSION
+# timescaledb, which fails harmlessly because the hook above needed the
+# extension first.
 set +e
 # shellcheck disable=SC2086
 $PG_EXEC pg_restore --dbname="$DATABASE_URL" --no-owner --no-acl < "$dump"
 status=$?
 set -e
 
-echo "==> finishing TimescaleDB restore"
-psql_ -c "SELECT timescaledb_post_restore()" >/dev/null
+if [ "$target_ts" != "0" ]; then
+  echo "==> finishing TimescaleDB restore"
+  psql_ -c "SELECT timescaledb_post_restore()" >/dev/null
+fi
 
 rows=$(psql_ -c "SELECT count(*) FROM telemetry" 2>/dev/null || echo "?")
 echo "==> done (pg_restore exit $status; telemetry rows now: $rows)"
 if [ "$status" -ne 0 ]; then
-  echo "    a non-zero exit is expected from the duplicate CREATE EXTENSION;" >&2
+  if [ "$target_ts" != "0" ]; then
+    echo "    a non-zero exit is expected from the duplicate CREATE EXTENSION;" >&2
+  fi
   echo "    check the output above for any error other than 'already exists'." >&2
 fi

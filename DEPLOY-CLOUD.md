@@ -328,6 +328,53 @@ curl -s localhost:8000/healthz | python3 -m json.tool
 
 ---
 
+### 2.7 สำรองข้อมูลจาก Supabase — ต้องทำเอง
+
+**แผนฟรีของ Supabase ไม่มี backup อัตโนมัติ** เอกสารของเขาบอกตรง ๆ ว่าให้ผู้ใช้แผนฟรี
+export ข้อมูลเองเป็นประจำและเก็บสำรองไว้นอกระบบ (daily backup เริ่มมีตั้งแต่แผน Pro ขึ้นไป
+ส่วน point-in-time recovery เป็นส่วนเสริมที่ต้องซื้อเพิ่มอีกที) ถ้าโปรเจกต์โดนลบหรือข้อมูลหาย
+**ไม่มีใครกู้ให้** นอกจากไฟล์ที่คุณเก็บไว้เอง
+
+`scripts/backup.sh` ชี้ไป Supabase ได้ตรง ๆ เพราะมันอ่าน `DATABASE_URL` ที่ตั้งไว้แล้ว
+
+**ลองครั้งแรก** บน Pi:
+
+```bash
+cd ~/iot-control/IoTDashboard && bash scripts/backup.sh
+```
+
+ได้ไฟล์ใน `ops/backups/iot-<วันเวลา>.dump` และลบไฟล์เก่ากว่า 30 วันให้เอง (ตั้งค่าได้ที่
+`RETENTION_DAYS`)
+
+**ถ้าขึ้นว่า pg_dump เวอร์ชันเก่ากว่าเซิร์ฟเวอร์** — เกิดแน่ถ้าโปรเจกต์คุณเป็น PostgreSQL 17
+เพราะ Raspberry Pi OS มี client เวอร์ชัน 15 และ pg_dump ปฏิเสธการ dump เซิร์ฟเวอร์ที่ใหม่กว่าตัวเอง
+สคริปต์จะตรวจให้ก่อนแล้วบอกคำสั่งที่ถูกต้องมาเลย หน้าตาแบบนี้:
+
+```bash
+PG_EXEC="docker run --rm -i postgres:17" bash scripts/backup.sh
+```
+
+**ตั้งให้ทำเองทุกวัน** — ตี 3:
+
+```bash
+( crontab -l 2>/dev/null; echo "0 3 * * * cd \$HOME/iot-control/IoTDashboard && bash scripts/backup.sh >> ops/backups/backup.log 2>&1" ) | crontab -
+```
+
+ไฟล์อยู่บน SD card ของ Pi ซึ่งก็พังได้เหมือนกัน — **คัดลอกออกไปที่อื่นด้วย** อย่างน้อยเดือนละครั้ง
+เช่น `scp pi:~/iot-control/IoTDashboard/ops/backups/*.dump .` ลงเครื่องคุณ
+
+**กู้คืน** — ต้องลงฐานข้อมูลที่ว่างเปล่า สคริปต์จะปฏิเสธถ้าปลายทางมีตารางอยู่แล้ว:
+
+```bash
+DATABASE_URL="<dsn ของฐานใหม่>" bash scripts/restore.sh ops/backups/iot-<วันเวลา>.dump
+```
+
+ทดสอบวงจร backup → restore แล้วทั้งบน PostgreSQL ธรรมดาและ TimescaleDB: จำนวนแถว telemetry
+กับ `schema_migrations` กลับมาครบเท่าเดิมทั้งสองแบบ สคริปต์รู้เองว่าปลายทางเป็นแบบไหน
+และจะไม่ยอมกู้ dump ที่มาจาก TimescaleDB ลงเครื่องที่ไม่มี extension นั้น เพราะ chunk จะไม่มีที่ลง
+
+---
+
 ## 3. Oracle Cloud — สมัครและสร้าง VM
 
 ### 3.1 สมัคร
