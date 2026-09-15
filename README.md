@@ -239,7 +239,7 @@ TimescaleDB ใช้ image เดียวกันได้โดยไม่�
 |---|---|---|
 | `002_auth_audit` · `003_user_mgmt` | ยังไม่มี (จองเลขไว้) | เป็นเฟส security — และ checksum ทำให้แก้ไฟล์ที่ apply แล้วไม่ได้ จึงไม่ควรสร้างไฟล์ครึ่ง ๆ ไว้ก่อน |
 | `main.py` รวม WS hub | แยกเป็น `hub.py` · `telemetry.py` · `history.py` | เอกสารไม่ได้ห้าม และ command lifecycle ยาวเกินกว่าจะยัดใน `main.py` |
-| WS `{"type":"devices"}` | `{"type":"snapshot"}` | snapshot ส่ง devices + states + pending มาพร้อมกัน ถ้าเปลี่ยนชื่อจะเสียความหมาย |
+| WS `{"type":"devices"}` | มีทั้ง `snapshot` และ `devices` | snapshot ส่ง devices + states + pending พร้อมกันตอนเชื่อมต่อ · `devices` ส่งเฉพาะรายชื่อเวลาเปลี่ยนชื่ออุปกรณ์ จะได้ไม่ล้าง state ที่ client ถืออยู่ |
 | `device_id` = `"1:3"` | `"matter:1:3"` | DeviceRouter ต้องรู้ backend จาก id |
 | SlowAPI rate limit | ยังไม่มี | ผูกกับ auth (key ตาม actor) — ไปพร้อมเฟส security |
 | palette `slate-950` · `emerald-500` · `amber-500` | CSS token ชุดเดียว + ramp ตามค่าที่อ่านได้ | สีถูกผูกกับความหมาย (ค่าสูง/ต่ำ, สีหลอดไฟจริง) แทนที่จะเป็นสีคงที่ต่อ component และเปลี่ยนธีมได้จากที่เดียว |
