@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import logging
 from contextlib import asynccontextmanager
 from typing import Any
@@ -33,6 +34,31 @@ log = logging.getLogger("iot")
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
+_static_versions: dict[str, tuple[float, str]] = {}
+
+
+def static_url(name: str) -> str:
+    """/static/<name>?v=<content hash>, so a deploy reaches browsers at once.
+
+    Without it a browser keeps an old script for as long as its own guess
+    says -- days, for a file that had not changed in weeks -- and runs it
+    against new HTML: the new logout button called a logout() the cached
+    dashboard.js did not have yet, and the click did nothing at all.
+    """
+    path = STATIC_DIR / name
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return "/static/" + name
+    cached = _static_versions.get(name)
+    if cached is None or cached[0] != mtime:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()[:12]
+        cached = _static_versions[name] = (mtime, digest)
+    return "/static/%s?v=%s" % (name, cached[1])
+
+
+templates.env.globals["static_url"] = static_url
+
 # Alpine.js evaluates expressions with the Function constructor, so 'unsafe-eval'
 # is required until we switch to its CSP build; Tailwind's play CDN injects a
 # <style> element, hence 'unsafe-inline' for styles.
@@ -62,6 +88,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Doc §14: never let a service worker or proxy cache the API.
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
+        # Always ask before reusing a static file. The ETag makes that a 304
+        # of a few hundred bytes; skipping the question is how a browser ended
+        # up running last week's dashboard.js (see static_url).
+        elif request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"
         return response
 
 

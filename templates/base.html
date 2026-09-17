@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0a0b0e">
   <title>{% block title %}IoT Control Gateway{% endblock %}</title>
-  <link rel="manifest" href="/static/manifest.json">
+  <link rel="manifest" href="{{ static_url('manifest.json') }}">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
 
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-  <script src="/static/api.js"></script>
+  <script src="{{ static_url('api.js') }}"></script>
   {% block head_scripts %}{% endblock %}
   <!-- Alpine is deferred, so it initialises after the page scripts above have
        defined the component factories they register. -->
