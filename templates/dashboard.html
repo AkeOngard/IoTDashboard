@@ -30,13 +30,25 @@
                 class="whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] text-[var(--muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
           สแกนใหม่
         </button>
-        <button @click="account.open = !account.open" title="บัญชี"
-                class="-mr-1 shrink-0 rounded-full p-1.5 text-[var(--muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
+        <button @click="account.open = !account.open" title="เปลี่ยนรหัสผ่าน"
+                class="shrink-0 rounded-full p-1.5 text-[var(--muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <circle cx="8" cy="5.5" r="2.6" stroke="currentColor" stroke-width="1.4"/>
             <path d="M2.8 14a5.2 5.2 0 0 1 10.4 0" stroke="currentColor" stroke-width="1.4"
                   stroke-linecap="round"/>
           </svg>
+        </button>
+        <!-- Logout is the one account action you reach for on a borrowed
+             screen, so it gets its own button with a word on it rather than a
+             place inside the panel. The word hides on a phone; the icon stays. -->
+        <button @click="logout()" :disabled="loggingOut" title="ออกจากระบบ"
+                class="-mr-2 flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1.5 text-[13px] text-[var(--muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--danger)] disabled:opacity-50">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M6 2.8H3.6a1 1 0 0 0-1 1v8.4a1 1 0 0 0 1 1H6M10.4 11l3-3-3-3M13.2 8H6.4"
+                  stroke="currentColor" stroke-width="1.4" stroke-linecap="round"
+                  stroke-linejoin="round"/>
+          </svg>
+          <span class="hidden sm:inline">ออกจากระบบ</span>
         </button>
       </div>
     </div>
@@ -430,9 +442,18 @@
                   class="rounded-lg px-2.5 py-1.5 text-[12px] text-[var(--muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
             ปิด
           </button>
-          <button @click="logout()"
-                  class="ml-auto rounded-lg px-2.5 py-1.5 text-[12px] text-[var(--danger)] transition-colors hover:bg-[var(--surface-hover)]">
-            ออกจากระบบ
+        </div>
+
+        <!-- Separate from changing the password: for a phone left signed in
+             somewhere, there is no reason to invent a new password. -->
+        <div class="mt-5 border-t border-[var(--line)] pt-4">
+          <p class="text-[12px] leading-relaxed text-[var(--faint)]">
+            ลืมออกจากระบบบนเครื่องอื่น? ให้ทุกเครื่องหลุดพร้อมกัน รวมเครื่องนี้ด้วย
+            โดยไม่ต้องเปลี่ยนรหัสผ่าน
+          </p>
+          <button @click="logoutAll()" :disabled="loggingOut"
+                  class="mt-2 rounded-lg px-2.5 py-1.5 text-[12px] text-[var(--danger)] ring-1 ring-[var(--line)] transition-colors hover:bg-[var(--surface-hover)] disabled:opacity-50">
+            ออกจากระบบทุกเครื่อง
           </button>
         </div>
       </div>

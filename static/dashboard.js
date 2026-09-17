@@ -438,13 +438,40 @@ function dashboard() {
     // ------------------------------------------------------------ account
 
     account: { open: false, current: '', next: '', busy: false, error: '', done: false },
+    loggingOut: false,
 
+    /** End this session on the server and leave. */
     async logout() {
+      await this._endSession('/api/auth/logout');
+    },
+
+    /** End every session, this one too, keeping the password. */
+    async logoutAll() {
+      if (!window.confirm('ให้ทุกเครื่องออกจากระบบ รวมเครื่องนี้ด้วย?')) return;
+      await this._endSession('/api/auth/logout-all');
+    },
+
+    async _endSession(path) {
+      this.loggingOut = true;
+      // Stop the socket first: otherwise its close reads as a dropped
+      // connection and the reconnect loop races the navigation below.
+      if (this._ws) { this._ws.onclose = null; this._ws.close(); }
       try {
-        await apiFetch('/api/auth/logout', { method: 'POST' });
-      } finally {
-        window.location.replace('/login');
+        await apiFetch(path, { method: 'POST' });
+      } catch (err) {
+        // 401 means there was no session to end, which is the goal anyway.
+        // Anything else means the server never heard us: the session is still
+        // live, and the cookie is HttpOnly, so this page cannot clear it
+        // either. Saying "signed out" here would be the one lie that matters.
+        if (err.status !== 401) {
+          this.loggingOut = false;
+          this.connect();
+          this.toast('error', 'ยังไม่ได้ออกจากระบบ',
+                     'ติดต่อเซิร์ฟเวอร์ไม่ได้ การเข้าสู่ระบบบนเครื่องนี้ยังใช้ได้อยู่ ลองใหม่อีกครั้ง');
+          return;
+        }
       }
+      window.location.replace('/login');
     },
 
     async changePassword() {

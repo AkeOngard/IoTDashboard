@@ -171,7 +171,8 @@ MATTER_WS_URL=ws://<ip-ของ-linux-box>:5580/ws
 | Method | Path | หมายเหตุ |
 |---|---|---|
 | `POST` | `/api/auth/login` | `{"password": "..."}` → ตั้ง cookie · 401 ผิด · 429 เดาถี่เกินไป |
-| `POST` | `/api/auth/logout` | ล้าง cookie |
+| `POST` | `/api/auth/logout` | ยกเลิก session นี้ที่เซิร์ฟเวอร์ แล้วล้าง cookie — cookie ที่ถูกคัดลอกไปก่อนหน้าก็ใช้ไม่ได้ |
+| `POST` | `/api/auth/logout-all` | ต้องล็อกอินอยู่ · ให้ทุกเครื่องหลุดรวมเครื่องนี้ โดยไม่เปลี่ยนรหัสผ่าน |
 | `POST` | `/api/auth/password` | `{"current": "...", "new": "..."}` · เปลี่ยนแล้วเบราว์เซอร์อื่นหลุดทั้งหมด |
 | `GET` | `/api/auth/status` | `{required, configured, authenticated}` |
 | `GET` | `/healthz` | `degraded` เมื่อต่อ hub หรือ DB ไม่ได้ · ไม่ได้ล็อกอินจะเห็นแค่ `status` |

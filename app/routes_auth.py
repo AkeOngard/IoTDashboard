@@ -113,9 +113,41 @@ async def login(
     return {"status": "ok"}
 
 
+def _clear_cookie(request: Request, response: Response) -> None:
+    # Same attributes as when it was set, so every browser treats this as the
+    # same cookie and drops it.
+    response.delete_cookie(
+        SESSION_COOKIE, path="/", httponly=True, samesite="strict", secure=_secure(request)
+    )
+
+
 @router.post("/logout")
 async def logout(request: Request, response: Response) -> dict[str, Any]:
-    response.delete_cookie(SESSION_COOKIE, path="/")
+    """End this session on the server, then tell the browser to forget it.
+
+    Clearing the cookie alone is a request to the browser; a copy of the token
+    taken earlier would keep working for the rest of its 30 days. Revoking it
+    here is what makes logging out mean something.
+    """
+    store = _store(request)
+    ended = store.revoke(request.cookies.get(SESSION_COOKIE))
+    _clear_cookie(request, response)
+    if ended:
+        log.info("logout from %s", _client(request))
+    return {"status": "ok"}
+
+
+@router.post("/logout-all")
+async def logout_all(request: Request, response: Response) -> dict[str, Any]:
+    """Sign every browser out, this one included, keeping the password."""
+    store = _store(request)
+    # Only someone already signed in may do this: /api/auth/* skips the gate,
+    # and ending the owner's sessions is not something to hand to a stranger.
+    if not store.valid(request.cookies.get(SESSION_COOKIE)):
+        raise HTTPException(status_code=401, detail="not signed in")
+    store.revoke_all()
+    _clear_cookie(request, response)
+    log.info("all sessions ended from %s", _client(request))
     return {"status": "ok"}
 
 

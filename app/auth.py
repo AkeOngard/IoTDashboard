@@ -96,6 +96,12 @@ class AuthStore:
         self._record: dict[str, Any] = {}
         self._secret = secret
         self._generation = 1
+        #: session id -> the moment its token would have expired anyway. A
+        #: logout has to kill the token on the server, not just ask the browser
+        #: to forget it: a copied cookie outlives a cleared one. Entries drop
+        #: out once they pass their expiry, so this never grows past the
+        #: sessions ended within one session lifetime.
+        self._revoked: dict[str, int] = {}
         #: mtime of the file as last read. scripts/set_password.py writes from
         #: another process -- the whole point of it being a CLI -- so the
         #: running app has to notice rather than need a restart.
@@ -122,8 +128,7 @@ class AuthStore:
             )
             return
         data = self._read()
-        self._record = data.get("password") or {}
-        self._generation = int(data.get("generation") or 1)
+        self._apply(data)
         stored_secret = data.get("session_secret") or ""
         if not self._secret:
             # No SESSION_SECRET in the environment: keep one here so sessions
@@ -176,8 +181,7 @@ class AuthStore:
         if mtime == self._mtime:
             return
         data = self._read()
-        self._record = data.get("password") or {}
-        self._generation = int(data.get("generation") or 1)
+        self._apply(data)
         stored = data.get("session_secret") or ""
         # An externally written secret wins: it is the one the file now signs
         # with, and disagreeing would silently reject every session.
@@ -186,9 +190,20 @@ class AuthStore:
         log.info("re-read %s (password %s)",
                  self.path, "set" if self._record else "not set")
 
+    def _apply(self, data: dict[str, Any]) -> None:
+        self._record = data.get("password") or {}
+        self._generation = int(data.get("generation") or 1)
+        revoked = data.get("revoked") or {}
+        self._revoked = {
+            str(sid): int(until) for sid, until in revoked.items()
+            if isinstance(until, (int, float))
+        } if isinstance(revoked, dict) else {}
+
     def _save(self, extra: dict[str, Any] | None = None) -> None:
         if self.path is None:
             return
+        now = time.time()
+        self._revoked = {sid: until for sid, until in self._revoked.items() if until > now}
         payload = dict(extra or {})
         payload.update(
             {
@@ -196,6 +211,7 @@ class AuthStore:
                 "password": self._record,
                 "generation": self._generation,
                 "session_secret": self._secret,
+                "revoked": self._revoked,
             }
         )
         temp = self.path.with_name(self.path.name + ".tmp")
@@ -208,6 +224,11 @@ class AuthStore:
         except OSError:
             pass
         os.replace(temp, self.path)
+        # Our own write is not news; do not re-read it on the next request.
+        try:
+            self._mtime = self.path.stat().st_mtime
+        except OSError:
+            self._mtime = None
 
     def set_password(self, password: str) -> None:
         problem = password_problem(password)
@@ -217,6 +238,8 @@ class AuthStore:
         # Changing the password signs every other browser out, which is the
         # only reason someone changes it in a hurry.
         self._generation += 1
+        # Every revoked token belonged to the old generation and is dead anyway.
+        self._revoked = {}
         self._save()
 
     def check_password(self, password: str) -> bool:
@@ -226,27 +249,71 @@ class AuthStore:
 
     # ---------------------------------------------------------- session token
 
+    # Format: <generation>.<expires>.<session id>.<signature>
+    #
+    # The session id is what makes a single logout possible. Without it, two
+    # sign-ins in the same second produced byte-identical tokens, so ending one
+    # would have ended both -- and there was nothing to name on a revocation
+    # list anyway.
+
     def issue(self, ttl_seconds: float) -> tuple[str, int]:
         expires = int(time.time() + ttl_seconds)
-        payload = "%d.%d" % (self._generation, expires)
+        payload = "%d.%d.%s" % (self._generation, expires, secrets.token_urlsafe(12))
         return "%s.%s" % (payload, self._sign(payload)), expires
 
-    def valid(self, token: str | None) -> bool:
+    def _parse(self, token: str | None) -> tuple[int, int, str] | None:
+        """The verified (generation, expires, session id), or None.
+
+        Checks only the signature -- whether the session is still usable is
+        valid()'s business, and revoke() needs to name a token that valid()
+        may already refuse.
+        """
         if not token:
-            return False
-        generation, _, rest = token.partition(".")
-        expires, _, signature = rest.partition(".")
-        if not signature:
-            return False
-        payload = "%s.%s" % (generation, expires)
+            return None
+        parts = token.split(".")
+        if len(parts) != 4:
+            return None
+        generation, expires, sid, signature = parts
+        payload = "%s.%s.%s" % (generation, expires, sid)
         if not hmac.compare_digest(signature, self._sign(payload)):
-            return False
+            return None
         try:
-            if int(generation) != self._generation or int(expires) < time.time():
-                return False
+            return int(generation), int(expires), sid
         except ValueError:
+            return None
+
+    def valid(self, token: str | None) -> bool:
+        parsed = self._parse(token)
+        if parsed is None:
             return False
+        generation, expires, sid = parsed
+        return (
+            generation == self._generation
+            and expires >= time.time()
+            and sid not in self._revoked
+        )
+
+    def revoke(self, token: str | None) -> bool:
+        """End one session for good. Returns whether there was one to end."""
+        parsed = self._parse(token)
+        if parsed is None:
+            return False
+        generation, expires, sid = parsed
+        if generation != self._generation or expires < time.time() or sid in self._revoked:
+            return False     # already dead; nothing worth remembering
+        self._revoked[sid] = expires
+        self._save()
         return True
+
+    def revoke_all(self) -> None:
+        """End every session, this one included, without changing the password.
+
+        For "I signed in on a friend's phone and forgot": no need to invent a
+        new password to get that browser out.
+        """
+        self._generation += 1
+        self._revoked = {}
+        self._save()
 
     def _sign(self, payload: str) -> str:
         digest = hmac.new(self._secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256)
