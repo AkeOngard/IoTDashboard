@@ -58,8 +58,19 @@
         this.busy = true; this.error = '';
         try {
           await apiFetch('/api/auth/login', { json: { password: this.password } });
-          // Full navigation rather than a fetch: the session cookie is set on
-          // this response, and the dashboard opens a WebSocket on load.
+          // The password was right, but that does not prove the browser kept
+          // the cookie. If it refused it, navigating on would bounce straight
+          // back here with no explanation -- so ask before leaving.
+          const status = await apiFetch('/api/auth/status');
+          if (!status.authenticated) {
+            this.error = 'รหัสผ่านถูกต้อง แต่เบราว์เซอร์ไม่ยอมเก็บ cookie — '
+                       + 'ลองเปิดผ่านที่อยู่ https แทน http หรือเปิดการยอมรับ cookie';
+            this.password = '';
+            this.busy = false;
+            return;
+          }
+          // Full navigation rather than a fetch: the dashboard opens its
+          // WebSocket on load, and it needs the cookie that is now in place.
           window.location.replace('/');
         } catch (err) {
           // The API and the logs speak English on purpose; this screen is the

@@ -30,10 +30,19 @@ def _client(request: Request) -> str:
 
 
 def _secure(request: Request) -> bool:
-    """Only mark the cookie Secure when the browser really is on https, or the
-    cookie would be dropped on a plain-http LAN visit and login would appear to
-    do nothing."""
-    return request.url.scheme == "https" or settings.public_origin.startswith("https://")
+    """Mark the cookie Secure only when *this* request arrived over https.
+
+    Not when PUBLIC_ORIGIN merely says https. The same dashboard is reached
+    both ways -- https through `tailscale serve`, plain http on the LAN -- and
+    a browser silently discards a Secure cookie set on an http page. Login then
+    returns 200, the redirect finds no session, and the operator is bounced back
+    to the login page with no error at all. That is exactly what happened on the
+    Pi, whose .env sets an https PUBLIC_ORIGIN.
+
+    Behind the tailscale proxy the scheme still reads https, because uvicorn
+    trusts X-Forwarded-Proto from 127.0.0.1 (see scripts/entrypoint.sh).
+    """
+    return request.url.scheme == "https"
 
 
 def set_session_cookie(request: Request, response: Response, token: str, max_age: int) -> None:
