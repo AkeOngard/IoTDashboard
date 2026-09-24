@@ -470,36 +470,6 @@
       </div>
     </div>
   </template>
-        <template x-if="account.done">
-          <p class="mt-2 text-[12px] text-[var(--on)]">เปลี่ยนรหัสผ่านแล้ว</p>
-        </template>
-
-        <div class="mt-4 flex items-center gap-2">
-          <button @click="changePassword()" :disabled="account.busy || !account.current || !account.next"
-                  class="rounded-lg bg-[var(--on)] px-3 py-1.5 text-[12px] font-medium text-black transition-opacity hover:opacity-90 disabled:opacity-40">
-            <span x-text="account.busy ? 'กำลังบันทึก…' : 'บันทึก'"></span>
-          </button>
-          <button @click="account.open = false"
-                  class="rounded-lg px-2.5 py-1.5 text-[12px] text-[var(--muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
-            ปิด
-          </button>
-        </div>
-
-        <!-- Separate from changing the password: for a phone left signed in
-             somewhere, there is no reason to invent a new password. -->
-        <div class="mt-5 border-t border-[var(--line)] pt-4">
-          <p class="text-[12px] leading-relaxed text-[var(--faint)]">
-            ลืมออกจากระบบบนเครื่องอื่น? ให้ทุกเครื่องหลุดพร้อมกัน รวมเครื่องนี้ด้วย
-            โดยไม่ต้องเปลี่ยนรหัสผ่าน
-          </p>
-          <button @click="logoutAll()" :disabled="loggingOut"
-                  class="mt-2 rounded-lg px-2.5 py-1.5 text-[12px] text-[var(--danger)] ring-1 ring-[var(--line)] transition-colors hover:bg-[var(--surface-hover)] disabled:opacity-50">
-            ออกจากระบบทุกเครื่อง
-          </button>
-        </div>
-      </div>
-    </div>
-  </template>
 
 </div>
 {% endblock %}
