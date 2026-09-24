@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import dataclasses
 import logging
+import math
 import time
 from typing import Any
 
@@ -306,15 +307,31 @@ class Hub:
 
 
 def _coerce(cap: Capability, value: Any) -> Any:
+    """The value the device should get, or ValueError when there is none.
+
+    Request bodies are parsed by Python's json, which accepts NaN and Infinity;
+    int(round()) of those, or float() of a word, would otherwise escape as a
+    500 instead of telling the caller what was wrong.
+    """
     if cap is Capability.SWITCH:
         if isinstance(value, str):
             return value.lower() in {"1", "true", "on", "yes"}
         return bool(value)
     if cap is Capability.BRIGHTNESS:
-        return max(0, min(100, int(round(float(value)))))
+        return max(0, min(100, _whole(cap, value)))
     if cap is Capability.COLOR_TEMP:
-        return max(1700, min(6500, int(round(float(value)))))
+        return max(1700, min(6500, _whole(cap, value)))
     return value
+
+
+def _whole(cap: Capability, value: Any) -> int:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("%s needs a number, not %r" % (cap.value, value)) from None
+    if not math.isfinite(number):
+        raise ValueError("%s needs a finite number, not %r" % (cap.value, value))
+    return int(round(number))
 
 
 def _matches(cap: Capability, target: Any, actual: Any) -> bool:

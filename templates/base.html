@@ -12,13 +12,16 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap"
         rel="stylesheet">
 
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <!-- Every script is served from here, none from a CDN: whatever runs on
+       this page can switch the house's lights, so a third party must not be
+       able to change it. See static/vendor/README.md to update them. -->
+  <link rel="stylesheet" href="{{ static_url('tailwind.css') }}">
+  <script src="{{ static_url('vendor/chart.js-4.4.4.umd.min.js') }}"></script>
   <script src="{{ static_url('api.js') }}"></script>
   {% block head_scripts %}{% endblock %}
   <!-- Alpine is deferred, so it initialises after the page scripts above have
        defined the component factories they register. -->
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <script defer src="{{ static_url('vendor/alpinejs-3.14.1.min.js') }}"></script>
 
   <style>
     /* One palette, one place. The UI is deliberately committed to a dark

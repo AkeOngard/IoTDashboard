@@ -1,7 +1,8 @@
 # IoT Control Gateway
 
 Monitor เซนเซอร์และควบคุมอุปกรณ์ Zigbee ผ่าน **Matter** (local control)
-FastAPI + WebSocket ฝั่งหลัง, Tailwind CDN + Alpine.js + Chart.js ฝั่งหน้า ไม่มี build step
+FastAPI + WebSocket ฝั่งหลัง, Tailwind + Alpine.js + Chart.js ฝั่งหน้า — ทุกไฟล์เสิร์ฟจากเครื่องเอง ไม่พึ่ง CDN
+(`static/tailwind.css` commit ไว้แล้ว แก้ class ใน `templates/` หรือ `static/` แล้วรัน `make css` — ต้องมี Node)
 
 โครงสร้างและชื่อไฟล์อ้างอิงจาก `IoT-project.html` (Project Documentation v1.0)
 ส่วนที่ยังไม่ตรงกับเอกสารมีสรุปไว้ในหัวข้อ [ส่วนที่ต่างจากเอกสาร](#ส่วนที่ต่างจากเอกสาร)
@@ -155,7 +156,7 @@ MATTER_WS_URL=ws://<ip-ของ-linux-box>:5580/ws
 | `RUN_MIGRATIONS` | `0` | ปกติ container `migrate` เป็นคนรัน |
 | `DEVICE_LABELS_PATH` | `data/labels.json` | ชื่อ/ห้องที่ตั้งเองในหน้าเว็บ · เว้นว่าง = ปิดการเปลี่ยนชื่อ |
 | `PUBLIC_ORIGIN` | `http://localhost:8000` | CORS |
-| `ALLOWED_HOSTS` | `*` | TrustedHost (คั่นด้วย comma) — `127.0.0.1`/`localhost` ถูกเติมให้เองเพื่อ healthcheck |
+| `ALLOWED_HOSTS` | `*` | TrustedHost (คั่นด้วย comma) — `127.0.0.1`/`localhost` ถูกเติมให้เองเพื่อ healthcheck · ถ้า `AUTH_PATH` ว่าง ค่า `*` จะถูกลดเหลือ loopback เท่านั้น (กัน DNS rebinding) |
 | `APP_BIND` | `0.0.0.0` | interface ที่เปิดพอร์ต dashboard · `127.0.0.1` = เข้าได้ผ่าน proxy เท่านั้น |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | proxy ที่ยอมเชื่อ `X-Forwarded-For` (เดิม `*` = ปลอม IP ได้) |
 | `AUTH_PATH` | `data/auth.json` | ที่เก็บ hash รหัสผ่าน · **เว้นว่าง = ปิดล็อกอิน** (log จะเตือนทุกครั้ง) |

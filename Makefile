@@ -9,7 +9,7 @@ PY           := python
 .DEFAULT_GOAL := help
 .PHONY: help init up down restart logs ps build dev \
         prod-up prod-deploy prod-logs migrate migrate-status migrate-verify migrate-new \
-        health ready commission matter-nodes backup restore tunnel clean
+        health ready commission matter-nodes backup restore tunnel css clean
 
 help: ## show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -101,6 +101,9 @@ prod-deploy: ## rolling update with the prod overlay
 	$(COMPOSE_PROD) run --rm migrate
 	$(COMPOSE_PROD) up -d --no-deps app
 	@$(MAKE) --no-print-directory health
+
+css: ## rebuild static/tailwind.css after changing classes (needs Node)
+	npx --yes tailwindcss@3.4.19 -c tailwind/tailwind.config.js -i tailwind/input.css -o static/tailwind.css --minify
 
 clean: ## remove containers and volumes (DESTROYS telemetry)
 	$(COMPOSE) down -v
