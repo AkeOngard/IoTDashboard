@@ -89,6 +89,13 @@ class Settings(BaseSettings):
     def trusted_hosts(self) -> list[str]:
         hosts = _split(self.allowed_hosts) or ["*"]
         if "*" in hosts:
+            if not self.auth_path:
+                # With no login, the Host check is all that stops a page the
+                # operator visits from reaching this port through DNS
+                # rebinding. "Any host" and "no password" together would leave
+                # the house open to every website, so fall back to loopback --
+                # list real names in ALLOWED_HOSTS to be reachable elsewhere.
+                return ["127.0.0.1", "localhost"]
             return ["*"]
         # The container HEALTHCHECK and `make health` call 127.0.0.1; forgetting
         # it in ALLOWED_HOSTS would mark a healthy container unhealthy.

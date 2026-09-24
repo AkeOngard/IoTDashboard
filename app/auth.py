@@ -35,6 +35,11 @@ SCRYPT_P = 1
 DKLEN = 32
 
 SESSION_COOKIE = "iot_session"
+#: Marks a browser that has signed in here before. It opens nothing; it only
+#: gets that browser its own login throttle, so strangers guessing from behind
+#: the same proxy address cannot lock the owner out. Survives logout on purpose.
+DEVICE_COOKIE = "iot_device"
+DEVICE_TTL_SECONDS = 365 * 24 * 3600
 #: A home dashboard is opened from the sofa; being asked to type a password
 #: every day teaches the operator to pick a shorter one.
 DEFAULT_TTL_HOURS = 30 * 24
@@ -234,7 +239,15 @@ class AuthStore:
         problem = password_problem(password)
         if problem:
             raise AuthError(problem)
-        self._record = hash_password(password)
+        self.set_password_hash(hash_password(password))
+
+    def set_password_hash(self, record: dict[str, Any]) -> None:
+        """Store an already-computed hash_password() result.
+
+        Split out so the server can run the slow scrypt in a worker thread and
+        only touch the store back on the event loop.
+        """
+        self._record = record
         # Changing the password signs every other browser out, which is the
         # only reason someone changes it in a hurry.
         self._generation += 1
@@ -315,6 +328,33 @@ class AuthStore:
         self._revoked = {}
         self._save()
 
+    # ---------------------------------------------------------- device token
+
+    # Format: device.<id>.<expires>.<signature>, signed under its own label so
+    # a device token can never pass for a session token or the other way round.
+
+    def issue_device(self) -> str:
+        payload = "device.%s.%d" % (
+            secrets.token_urlsafe(12), int(time.time() + DEVICE_TTL_SECONDS)
+        )
+        return "%s.%s" % (payload, self._sign("device|" + payload))
+
+    def device_id(self, token: str | None) -> str | None:
+        """The id in a genuine, unexpired device token, or None."""
+        if not token:
+            return None
+        parts = token.split(".")
+        if len(parts) != 4 or parts[0] != "device":
+            return None
+        payload = ".".join(parts[:3])
+        if not hmac.compare_digest(parts[3], self._sign("device|" + payload)):
+            return None
+        try:
+            expires = int(parts[2])
+        except ValueError:
+            return None
+        return parts[1] if expires >= time.time() else None
+
     def _sign(self, payload: str) -> str:
         digest = hmac.new(self._secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256)
         return base64.urlsafe_b64encode(digest.digest()).decode("ascii").rstrip("=")
@@ -340,6 +380,12 @@ class LoginThrottle:
     the address is the tailnet peer, which is exactly the granularity wanted.
     """
 
+    #: Addresses remembered at once. Each failure from a new address adds one,
+    #: and an IPv6 prefix holds more addresses than there is memory; past this
+    #: the stalest are forgotten, which costs an attacker nothing they did not
+    #: already have by switching address.
+    MAX_KEYS = 10_000
+
     def __init__(self, limit: int = 10, window: float = 900.0) -> None:
         self.limit = limit
         self.window = window
@@ -363,8 +409,21 @@ class LoginThrottle:
 
     def record_failure(self, key: str) -> None:
         now = time.time()
+        if key not in self._failures and len(self._failures) >= self.MAX_KEYS:
+            self._prune(now)
         self._failures.setdefault(key, []).append(now)
         self._recent(key, now)
+
+    def _prune(self, now: float) -> None:
+        for key in list(self._failures):
+            self._recent(key, now)
+        # Still full of live entries: drop the ones whose last failure is
+        # oldest. dicts keep insertion order, not recency, so sort.
+        excess = len(self._failures) - self.MAX_KEYS + 1
+        if excess > 0:
+            stalest = sorted(self._failures, key=lambda k: self._failures[k][-1])[:excess]
+            for key in stalest:
+                del self._failures[key]
 
     def clear(self, key: str) -> None:
         self._failures.pop(key, None)

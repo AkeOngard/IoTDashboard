@@ -29,6 +29,8 @@ async def _command(request: Request, device_id: str, capability: str, value: Any
         return await _hub(request).execute(device_id, capability, value)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except CommandError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

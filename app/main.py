@@ -7,6 +7,7 @@ import hashlib
 import logging
 from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,18 +60,23 @@ def static_url(name: str) -> str:
 
 templates.env.globals["static_url"] = static_url
 
-# Alpine.js evaluates expressions with the Function constructor, so 'unsafe-eval'
-# is required until we switch to its CSP build; Tailwind's play CDN injects a
-# <style> element, hence 'unsafe-inline' for styles.
+# Scripts come from this origin only -- no CDN, no inline <script> -- so an
+# injected <script> tag or onerror= handler does not run. Two exceptions remain:
+#   'unsafe-eval'   Alpine.js evaluates its x-* expressions with the Function
+#                   constructor; dropping it means moving to Alpine's CSP build.
+#   style 'unsafe-inline'  Alpine applies :style bindings with setAttribute,
+#                   which CSP counts as an inline style.
 CSP = (
     "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
+    "script-src 'self' 'unsafe-eval'; "
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src 'self' https://fonts.gstatic.com; "
     "img-src 'self' data:; "
     "connect-src 'self' ws: wss:; "
+    "object-src 'none'; "
     "frame-ancestors 'none'; "
-    "base-uri 'self'"
+    "base-uri 'self'; "
+    "form-action 'self'"
 )
 
 
@@ -168,6 +174,12 @@ async def lifespan(app: FastAPI):
     auth = AuthStore(settings.auth_path or None, settings.session_secret)
     auth.load()
     app.state.auth = auth
+    if not auth.enabled and settings.trusted_hosts != ["*"] and "*" in settings.allowed_hosts:
+        log.warning(
+            "login is disabled and ALLOWED_HOSTS is '*': answering on %s only; "
+            "list this machine's names in ALLOWED_HOSTS to reach it from elsewhere",
+            ", ".join(settings.trusted_hosts),
+        )
     app.state.login_throttle = LoginThrottle(
         limit=settings.login_attempts, window=settings.login_window_minutes * 60
     )
@@ -295,6 +307,15 @@ async def stream(websocket: WebSocket) -> None:
     # sees this connection: check here or the socket is wide open.
     store: AuthStore = app.state.auth
     store.reload_if_changed()
+    if not _origin_allowed(websocket):
+        # Browsers do not apply CORS to WebSockets: any page can open one to
+        # this host, and the cookie decides the rest. SameSite=Strict keeps the
+        # session off a cross-site handshake today; this check does not lean on
+        # that alone, and it is the only guard when login is disabled.
+        log.warning("websocket from foreign origin %r refused", websocket.headers.get("origin"))
+        await websocket.accept()
+        await websocket.close(code=1008, reason="origin not allowed")
+        return
     if store.enabled and not store.valid(websocket.cookies.get(SESSION_COOKIE)):
         # Accept, then close with 1008. Closing *before* accepting rejects the
         # handshake with an HTTP 403, and a browser reports that as a plain
@@ -333,6 +354,28 @@ async def stream(websocket: WebSocket) -> None:
         hub.unsubscribe(queue)
         with contextlib.suppress(Exception):
             await websocket.close()
+
+
+def _origin_allowed(websocket: WebSocket) -> bool:
+    """Is this handshake from the dashboard's own page?
+
+    Same origin means the Origin names the host the browser asked for -- the
+    Host header, or X-Forwarded-Host when a proxy rewrote it. Either is set by
+    the browser or the proxy, never by the page opening the socket. PUBLIC_ORIGIN
+    is accepted as well. No Origin at all is a non-browser client, which no
+    other site can steer; it still needs the cookie.
+    """
+    origin = websocket.headers.get("origin")
+    if not origin:
+        return True
+    if origin.rstrip("/") in {o.rstrip("/") for o in settings.cors_origins}:
+        return True
+    netloc = urlsplit(origin).netloc.lower()
+    hosts = {
+        websocket.headers.get("host", "").lower(),
+        websocket.headers.get("x-forwarded-host", "").split(",")[0].strip().lower(),
+    }
+    return bool(netloc) and netloc in hosts
 
 
 async def _drain(websocket: WebSocket) -> None:
