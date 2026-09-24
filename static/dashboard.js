@@ -484,7 +484,20 @@ function dashboard() {
         this.account.done = true;
         this.account.current = ''; this.account.next = '';
       } catch (err) {
-        this.account.error = err.message;
+        // The server's reasons are English, shared with the CLI; say them in
+        // the language of the rest of the panel. Anything unforeseen still
+        // shows as sent rather than as a vague "failed".
+        const detail = err.message || '';
+        if (detail === 'not signed in') {
+          window.location.replace('/login');
+          return;
+        }
+        this.account.error =
+            detail === 'current password is wrong' ? 'รหัสผ่านปัจจุบันไม่ถูกต้อง'
+          : detail.startsWith('password must be at least') ? 'รหัสผ่านใหม่ต้องมีอย่างน้อย 10 ตัวอักษร'
+          : detail.startsWith('password must not start or end') ? 'รหัสผ่านใหม่ต้องไม่ขึ้นต้นหรือลงท้ายด้วยช่องว่าง'
+          : err.status === 0 ? 'ติดต่อเซิร์ฟเวอร์ไม่ได้'
+          : detail || 'เปลี่ยนรหัสผ่านไม่สำเร็จ';
       } finally {
         this.account.busy = false;
       }
