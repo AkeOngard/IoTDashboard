@@ -328,15 +328,20 @@ docker compose -f docker-compose.yml -f docker-compose.dashboard.yml up -d
 
 (ไม่ต้องใส่ `--build` ซ้ำ ข้อ 4 build ไปแล้ว)
 
-**6) ตรวจว่าเข้าทางที่ถูก**:
-
-```bash
-curl -s localhost:8000/healthz | python3 -m json.tool
-```
+**6) ตรวจว่าเข้าทางที่ถูก** — ล็อกอิน dashboard แล้วเปิด `/healthz` ในเบราว์เซอร์เดียวกัน
+(เช่น `https://<ชื่อ Pi>.ts.net/healthz`) — `curl` จาก Pi จะได้แค่ `{"status":"ok"}` เพราะไม่ได้ล็อกอิน
+และรายละเอียดไม่แสดงให้คนที่ไม่ได้ล็อกอินเห็น
 
 ต้องเห็น `"connected": true` และ `"features": {"timescaledb": null, "rollup": false}` — `null` ตรงนี้
 ถูกต้อง แปลว่ารู้ตัวว่าอยู่บน Postgres ธรรมดาและเลือก SQL ให้เองแล้ว แถบบนสุดของหน้าเว็บจะเปลี่ยนจาก
 "ไม่บันทึกประวัติ" เป็นสถานะปกติ และการ์ดจะมีปุ่มกราฟขึ้นมา
+
+หรือถามฐานข้อมูลตรงจาก Pi ด้วย user เดียวกับที่แอปใช้ — ถ้า `ล่าสุด` ใหม่กว่าเวลาตอนนี้ไม่เกิน
+ราว 5 นาที แปลว่าแอปเขียนได้จริง:
+
+```bash
+docker exec iot-app sh -c 'psql "$DATABASE_URL" -c "SELECT count(*) AS แถว, max(ts) AS ล่าสุด FROM telemetry"'
+```
 
 กราฟจะยังว่างอยู่ราวห้านาที — ตัวบันทึกมี deadband และเต้นทุก 5 นาที จึงต้องรอให้มีจุดก่อน
 
