@@ -53,7 +53,9 @@ iot-control/
 │
 ├── migrations/
 │   ├── 001_init.sql            # extensions + helpers
-│   └── 004_telemetry.sql       # devices, hypertable, CAGG   (002/003 จองไว้ให้ auth)
+│   ├── 004_telemetry.sql       # devices, telemetry          (002/003 จองไว้ให้ auth)
+│   ├── 005_timescale.sql       # hypertable, CAGG — เฉพาะที่มี TimescaleDB
+│   └── 006_supabase_rls.sql    # ปิด Data API ของ Supabase (RLS) — เฉพาะบน Supabase
 │
 ├── scripts/
 │   ├── migrate.py              # up / status / verify / new

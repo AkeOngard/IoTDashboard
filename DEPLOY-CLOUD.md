@@ -316,7 +316,7 @@ docker compose -f docker-compose.yml -f docker-compose.dashboard.yml run --rm ap
 ต้องขึ้นแบบนี้ — บรรทัด `skipped` คือสิ่งที่ถูกต้องบน Supabase ไม่ใช่ error:
 
 ```
-applied: 001_init.sql, 004_telemetry.sql
+applied: 001_init.sql, 004_telemetry.sql, 006_supabase_rls.sql
 skipped: 005_timescale.sql (extension not installed -- history uses plain SQL)
 ```
 
@@ -344,6 +344,26 @@ curl -s localhost:8000/healthz | python3 -m json.tool
 288 แถว/วัน ≈ 105,000 แถว/ปี แถวละราว 120 ไบต์รวม index → **ราว 12 MB ต่อ capability ต่อปี**
 สวิตช์ 2 ช่องกับเซนเซอร์อุณหภูมิ/ความชื้นหนึ่งตัว = 4 capability ≈ 50 MB/ปี อยู่ใน 500 MB ได้สบาย
 ถ้าจะเพิ่มอุปกรณ์เยอะ ให้ลด `HISTORY_RETENTION_DAYS` ลง
+
+**คำเตือน "RLS disabled" ใน Supabase** — migration 006 จัดการให้แล้ว ไม่ต้องสร้าง policy เอง
+
+Supabase เปิดทุกตารางใน `public` ผ่าน REST API ให้ใครก็ได้ที่ถือ anon key ซึ่งเป็น key ที่ตั้งใจให้
+เปิดเผย ถ้าไม่มี RLS คนที่ได้ key นี้ไปจะอ่านประวัติ เขียนค่าปลอม หรือลบข้อมูลได้ทั้งหมด แอปนี้ไม่ได้ใช้
+API ตัวนั้นเลย มันต่อ Postgres ตรง ๆ ในฐานะ**เจ้าของตาราง** และเจ้าของตารางไม่ถูก RLS บังคับ ดังนั้น
+006 จึง:
+
+- เปิด RLS บน `devices`, `telemetry`, `schema_migrations` **โดยไม่มี policy เลย** — ทาง API จะไม่เห็น
+  ข้อมูลสักแถว ส่วนแอป, backup และ restore ทำงานเหมือนเดิม
+- ถอนสิทธิ์ทั้งหมดของ `anon` กับ `authenticated` (RLS ไม่คุม `TRUNCATE` จึงต้องถอนด้วย)
+- ถ้าผู้ใช้ใน `DATABASE_URL` ไม่ใช่เจ้าของตาราง จะ**หยุดพร้อม error และไม่เปลี่ยนอะไรเลย** แทนที่จะ
+  ล็อกแอปออกจากตารางของตัวเอง
+
+อย่าเพิ่ม policy ให้ `anon` หรือกด "Enable RLS" แล้วสร้าง policy ตามที่หน้าเว็บ Supabase แนะนำ —
+policy คือการเปิดทางให้ API เข้ามา ซึ่งแอปนี้ไม่ต้องการ และอย่าใช้ `FORCE ROW LEVEL SECURITY`
+เพราะจะบังคับเจ้าของตารางด้วย แอปจะอ่านเขียนไม่ได้ทันที
+
+ถ้าติดตั้งไว้ก่อนมี 006 ให้รัน migrate ตามข้อ 4 อีกครั้ง (build ก่อน) แล้ว Security Advisor ของ
+Supabase จะไม่เตือนเรื่องนี้อีก
 
 **ถ้าต่อไม่ได้** ดูที่ `docker logs iot-app`:
 
