@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -94,11 +95,19 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Doc §14: never let a service worker or proxy cache the API.
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
-        # Always ask before reusing a static file. The ETag makes that a 304
-        # of a few hundred bytes; skipping the question is how a browser ended
-        # up running last week's dashboard.js (see static_url).
         elif request.url.path.startswith("/static/"):
-            response.headers["Cache-Control"] = "no-cache"
+            if request.query_params.get("v"):
+                # static_url() put the file's content hash in the URL, so this
+                # URL can never name different bytes: keep it for good. A page
+                # load then costs the Pi one HTML response instead of that
+                # plus a revalidation round trip per script and stylesheet.
+                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            else:
+                # Unversioned (manifest links, hand-typed URLs): always ask.
+                # The ETag makes that a 304 of a few hundred bytes; skipping
+                # the question is how a browser ended up running last week's
+                # dashboard.js.
+                response.headers["Cache-Control"] = "no-cache"
         return response
 
 
@@ -235,6 +244,11 @@ app = FastAPI(title="IoT Control Gateway", version="0.3.0", lifespan=lifespan)
 
 app.add_middleware(RequireLoginMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
+# Text shrinks to a quarter or less. Scripts and CSS are compressed once per
+# browser per deploy (they are cached for good, above); the rest is the page
+# itself and small JSON, which costs the Pi's CPU less than the extra bytes
+# cost a phone on a weak link.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

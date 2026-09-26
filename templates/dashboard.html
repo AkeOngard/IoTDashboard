@@ -3,50 +3,58 @@
 {% block head_scripts %}<script src="{{ static_url('dashboard.js') }}"></script>{% endblock %}
 
 {% block content %}
-<div x-data="dashboard()" x-init="init()" x-cloak class="min-h-screen">
+<!-- No x-init: Alpine calls the component's init() by itself, and calling it
+     again here opened a second WebSocket -- every message sent twice. -->
+<div x-data="dashboard()" x-cloak class="min-h-screen">
 
   <!-- ── header ─────────────────────────────────────────────────────────── -->
-  <header class="sticky top-0 z-20 border-b border-[var(--line)] bg-[var(--bg)]/85 backdrop-blur-xl">
-    <!-- Narrow screens drop the status onto its own row (order-3 + w-full)
-         rather than truncating it; from sm up everything sits on one line. -->
-    <div class="mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-1 px-6 py-3 sm:h-16 sm:flex-nowrap sm:py-0">
-      <h1 class="order-1 whitespace-nowrap text-[15px] font-semibold tracking-tight">IoT Gateway</h1>
-
-      <!-- One line instead of three dots: say the single most useful thing. -->
-      <div class="order-3 flex w-full min-w-0 items-center gap-2 sm:order-2 sm:w-auto">
-        <span class="h-[6px] w-[6px] shrink-0 rounded-full"
-              :class="health.tone === 'on' ? 'bg-[var(--on)]'
-                    : health.tone === 'warn' ? 'bg-[var(--warn)] is-pending'
-                    : health.tone === 'danger' ? 'bg-[var(--danger)] is-pending'
-                    : 'bg-[var(--faint)]'"></span>
-        <span class="truncate text-[13px] text-[var(--muted)]" x-text="health.text"></span>
+  <header class="sticky top-0 z-20 border-b border-[var(--line)] bg-[rgba(11,12,15,.92)]">
+    <div class="mx-auto flex h-16 max-w-6xl items-center gap-3 pl-4 pr-2 sm:h-[72px] sm:gap-5 sm:px-8">
+      <div class="flex min-w-0 items-center gap-2.5">
+        <svg class="shrink-0" width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M3.5 10.5 12 3.8l8.5 6.7V20H3.5z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+          <circle cx="12" cy="14" r="2.2" :fill="health.tone === 'on' ? 'var(--on)' : health.tone === 'muted' ? 'var(--faint)' : 'var(--' + health.tone + ')'"/>
+        </svg>
+        <div class="min-w-0 leading-tight">
+          <h1 class="text-[17px] font-semibold tracking-tight sm:text-[18px]">IoT Gateway</h1>
+          <!-- On a phone the status rides under the name; from sm up it gets a pill. -->
+          <p class="truncate text-[12px] sm:hidden"
+             :class="{ on: 'text-[var(--on-text)]', warn: 'text-[var(--warn-text)]', danger: 'text-[var(--danger-text)]', muted: 'text-[var(--muted)]' }[health.tone]"
+             x-text="health.text"></p>
+        </div>
       </div>
 
-      <div class="order-2 ml-auto flex shrink-0 items-center gap-4 sm:order-3">
-        <span class="hidden whitespace-nowrap text-[13px] text-[var(--faint)] sm:block">
-          <span class="text-[var(--muted)]" x-text="devices.length"></span> อุปกรณ์
-        </span>
-        <button @click="refresh()"
-                class="whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] text-[var(--muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
-          สแกนใหม่
+      <!-- One line instead of three dots: say the single most useful thing. -->
+      <div class="hidden items-center gap-2 rounded-full px-3 py-1.5 sm:flex" :style="healthStyle">
+        <span class="h-2 w-2 shrink-0 rounded-full bg-current"
+              :class="(health.tone === 'warn' || health.tone === 'danger') && 'is-pending'"></span>
+        <span class="whitespace-nowrap text-[14px]" x-text="health.text"></span>
+      </div>
+
+      <div class="ml-auto flex shrink-0 items-center gap-0.5 sm:gap-2">
+        <button @click="refresh()" :disabled="refreshing" title="สแกนอุปกรณ์ใหม่" aria-label="สแกนอุปกรณ์ใหม่"
+                class="flex h-11 min-w-11 items-center justify-center gap-2 rounded-xl text-[15px] transition-colors hover:bg-[var(--surface-hover)] sm:border sm:border-[var(--line)] sm:bg-[var(--surface)] sm:px-4">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" :class="refreshing && 'spin'">
+            <path d="M20 12a8 8 0 1 1-2.4-5.7M20 4v4.5h-4.5" stroke="currentColor" stroke-width="1.7"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span class="hidden sm:inline">สแกนอุปกรณ์ใหม่</span>
         </button>
-        <button @click="account.open = !account.open" title="เปลี่ยนรหัสผ่าน"
-                class="shrink-0 rounded-full p-1.5 text-[var(--muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <circle cx="8" cy="5.5" r="2.6" stroke="currentColor" stroke-width="1.4"/>
-            <path d="M2.8 14a5.2 5.2 0 0 1 10.4 0" stroke="currentColor" stroke-width="1.4"
-                  stroke-linecap="round"/>
+        <button @click="account.open = !account.open" title="บัญชีและรหัสผ่าน" aria-label="บัญชีและรหัสผ่าน"
+                class="flex h-11 w-11 items-center justify-center rounded-xl transition-colors hover:bg-[var(--surface-hover)] sm:border sm:border-[var(--line)] sm:bg-[var(--surface)]">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="8.5" r="3.6" stroke="currentColor" stroke-width="1.7"/>
+            <path d="M4.8 20a7.2 7.2 0 0 1 14.4 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
           </svg>
         </button>
         <!-- Logout is the one account action you reach for on a borrowed
-             screen, so it gets its own button with a word on it rather than a
-             place inside the panel. The word hides on a phone; the icon stays. -->
-        <button @click="logout()" :disabled="loggingOut" title="ออกจากระบบ"
-                class="-mr-2 flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1.5 text-[13px] text-[var(--muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--danger)] disabled:opacity-50">
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M6 2.8H3.6a1 1 0 0 0-1 1v8.4a1 1 0 0 0 1 1H6M10.4 11l3-3-3-3M13.2 8H6.4"
-                  stroke="currentColor" stroke-width="1.4" stroke-linecap="round"
-                  stroke-linejoin="round"/>
+             screen, so it gets its own button rather than a place inside the
+             panel. The word hides on a phone; the icon stays. -->
+        <button @click="logout()" :disabled="loggingOut" title="ออกจากระบบ" aria-label="ออกจากระบบ"
+                class="flex h-11 min-w-11 items-center justify-center gap-2 rounded-xl text-[15px] text-[var(--muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--danger)] disabled:opacity-50 sm:px-3.5">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M9 4H5.5A1.5 1.5 0 0 0 4 5.5v13A1.5 1.5 0 0 0 5.5 20H9M15.5 16.5 20 12l-4.5-4.5M19.5 12H9.5"
+                  stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
           <span class="hidden sm:inline">ออกจากระบบ</span>
         </button>
@@ -54,7 +62,7 @@
     </div>
   </header>
 
-  <main class="mx-auto max-w-5xl px-6 pb-24 pt-10">
+  <main class="mx-auto flex max-w-6xl flex-col gap-5 px-4 pb-24 pt-4 sm:gap-8 sm:px-8 sm:pt-8">
 
     <!-- Suggests the rooms already in use while renaming. -->
     <datalist id="room-names">
@@ -64,406 +72,520 @@
     <!-- Empty state names the actual blocker: no server, no matter-server, or
          a reachable matter-server with nothing commissioned yet. -->
     <template x-if="devices.length === 0">
-      <div class="py-32 text-center text-[13px] leading-relaxed">
+      <div class="py-32 text-center text-[15px] leading-relaxed">
         <p class="text-[var(--muted)]"
            x-text="!socket ? 'ต่อเซิร์ฟเวอร์ไม่ได้'
                  : !adapterConnected ? 'ยังต่อ ' + adapterName + ' ไม่ได้'
                  : 'ยังไม่มีอุปกรณ์'"></p>
-        <p class="mt-1 text-[var(--faint)]"
+        <p class="mt-1 text-[13px] text-[var(--faint)]"
            x-text="!socket ? 'กำลังลองเชื่อมต่อใหม่อัตโนมัติ'
                  : !adapterConnected ? 'ตรวจว่า matter-server รันอยู่ และ MATTER_WS_URL ชี้ถูกที่'
                  : 'matter-server พร้อมแล้ว — commission Hub เข้า fabric ก่อน'"></p>
       </div>
     </template>
 
-    <template x-for="room in rooms" :key="room">
-      <section class="mb-12">
+    <template x-if="devices.length > 0">
+      <div class="flex flex-col gap-5 sm:gap-8">
 
-        <div class="mb-4 flex items-baseline gap-3">
-          <h2 class="text-[13px] font-medium tracking-tight text-[var(--muted)]" x-text="room"></h2>
-          <span class="text-[12px] tabular-nums text-[var(--faint)]" x-text="byRoom(room).length"></span>
-          <span class="ml-1 h-px flex-1 bg-[var(--line)]"></span>
-        </div>
+        <!-- ── overview ─────────────────────────────────────────────────── -->
+        <section aria-label="ภาพรวมบ้าน" class="grid grid-cols-3 gap-2 sm:gap-4 lg:grid-cols-4">
+          <div class="flex flex-col gap-1 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-3 sm:gap-1.5 sm:rounded-[20px] sm:p-5">
+            <span class="text-[12px] text-[var(--muted)] sm:text-[14px]">เปิดอยู่<span class="hidden sm:inline">ตอนนี้</span></span>
+            <p class="flex items-baseline gap-1.5">
+              <span class="text-[26px] font-medium leading-tight tabular-nums sm:text-[40px]" x-text="onCount"></span>
+              <span class="text-[13px] text-[var(--faint)] sm:text-[15px]">/ <span x-text="switchable.length"></span><span class="hidden sm:inline"> อุปกรณ์</span></span>
+            </p>
+            <button @click="allOff()" :disabled="!onCount"
+                    class="mt-auto h-9 rounded-[10px] border border-[var(--line-strong)] bg-[var(--surface-2)] px-2 text-[13px] transition-colors hover:bg-[var(--surface-hover)] disabled:cursor-default disabled:opacity-40 sm:h-10 sm:self-start sm:px-3.5 sm:text-[14px]">
+              ปิดทั้งหมด
+            </button>
+          </div>
 
-        <div class="grid items-start gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <template x-for="device in byRoom(room)" :key="device.id">
-
-            <article class="tinted group rounded-2xl bg-[var(--surface)] p-5 ring-1 ring-white/[.05] transition-colors hover:bg-[var(--surface-hover)]"
-                     :class="device.online ? '' : 'opacity-45'"
-                     :style="cardTint(device)">
-
-              <!-- name. The hub rarely knows what the operator calls a device,
-                   so the card is where a real name gets attached. -->
-              <template x-if="editing !== device.id">
-                <div class="mb-4 flex items-start gap-2">
-                  <!-- Device icon. The glyph says what the thing is, its colour
-                       and glow say what it is doing right now. All of it is
-                       inline SVG driven by CSS, so the Pi serves it as part of
-                       the page and the viewer's browser does the drawing. -->
-                  <span class="dev-icon" :class="iconActive(device) && 'is-active'"
-                        :style="iconStyle(device)" aria-hidden="true">
-                    <template x-if="iconKind(device) === 'light'">
-                      <svg viewBox="0 0 24 24" fill="none">
-                        <g class="rays" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                          <path d="M12 1.5v2M3.9 4.4l1.4 1.4M1.5 12.5h2M20.1 4.4l-1.4 1.4M22.5 12.5h-2"/>
-                        </g>
-                        <path class="glow" fill="currentColor"
-                              d="M12 4.5a6.2 6.2 0 0 0-3.7 11.2v2.1h7.4v-2.1A6.2 6.2 0 0 0 12 4.5Z"/>
-                        <path d="M12 4.5a6.2 6.2 0 0 0-3.7 11.2v2.1h7.4v-2.1A6.2 6.2 0 0 0 12 4.5Z"
-                              stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-                        <path d="M9.8 20.5h4.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                      </svg>
-                    </template>
-
-                    <template x-if="iconKind(device) === 'plug'">
-                      <svg viewBox="0 0 24 24" fill="none">
-                        <path class="glow" fill="currentColor"
-                              d="M6.5 9.5h11v3.2a5.5 5.5 0 0 1-11 0V9.5Z"/>
-                        <path d="M6.5 9.5h11v3.2a5.5 5.5 0 0 1-11 0V9.5Z"
-                              stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-                        <path d="M9.3 9.5V4.2M14.7 9.5V4.2M12 18.2v2.6"
-                              stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                      </svg>
-                    </template>
-
-                    <template x-if="iconKind(device) === 'switch'">
-                      <svg viewBox="0 0 24 24" fill="none">
-                        <rect class="glow" x="6" y="3" width="12" height="18" rx="3" fill="currentColor"/>
-                        <rect x="6" y="3" width="12" height="18" rx="3"
-                              stroke="currentColor" stroke-width="1.5"/>
-                        <!-- The rocker itself moves: the one part of the icon
-                             that mirrors the physical thing being switched. -->
-                        <rect class="lever" x="9" y="12.6" width="6" height="5.4" rx="1.6"
-                              fill="currentColor"/>
-                      </svg>
-                    </template>
-
-                    <template x-if="iconKind(device) === 'contact'">
-                      <svg viewBox="0 0 24 24" fill="none">
-                        <path d="M4 3.5h16v17H4z" stroke="currentColor" stroke-width="1.5"
-                              stroke-linejoin="round"/>
-                        <path class="panel" d="M12 3.5h8v17h-8z" fill="currentColor"
-                              fill-opacity=".18" stroke="currentColor" stroke-width="1.5"
-                              stroke-linejoin="round"/>
-                        <circle cx="13.6" cy="12" r=".9" fill="currentColor"/>
-                      </svg>
-                    </template>
-
-                    <template x-if="iconKind(device) === 'occupancy'">
-                      <svg viewBox="0 0 24 24" fill="none">
-                        <circle class="ping" cx="12" cy="12" r="9.5" stroke="currentColor"
-                                stroke-width="1.5"/>
-                        <circle cx="12" cy="8.4" r="2.9" stroke="currentColor" stroke-width="1.5"/>
-                        <path d="M5.8 20.2a6.2 6.2 0 0 1 12.4 0" stroke="currentColor"
-                              stroke-width="1.5" stroke-linecap="round"/>
-                      </svg>
-                    </template>
-
-                    <template x-if="iconKind(device) === 'climate'">
-                      <svg viewBox="0 0 24 24" fill="none">
-                        <path d="M9.5 13.8V5a2.2 2.2 0 1 1 4.4 0v8.8a4.6 4.6 0 1 1-4.4 0Z"
-                              stroke="currentColor" stroke-width="1.5"/>
-                        <path class="mercury" d="M11.7 9.5v6.8" stroke="currentColor"
-                              stroke-width="2.6" stroke-linecap="round"/>
-                      </svg>
-                    </template>
-
-                    <template x-if="iconKind(device) === 'lux'">
-                      <svg viewBox="0 0 24 24" fill="none">
-                        <circle class="glow" cx="12" cy="12" r="4.6" fill="currentColor"/>
-                        <circle cx="12" cy="12" r="4.6" stroke="currentColor" stroke-width="1.5"/>
-                        <g class="rays" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                          <path d="M12 1.8v2.4M12 19.8v2.4M1.8 12h2.4M19.8 12h2.4M4.8 4.8l1.7 1.7M17.5 17.5l1.7 1.7M19.2 4.8l-1.7 1.7M6.5 17.5l-1.7 1.7"/>
-                        </g>
-                      </svg>
-                    </template>
-
-                    <template x-if="iconKind(device) === 'sensor'">
-                      <svg viewBox="0 0 24 24" fill="none">
-                        <circle cx="12" cy="12" r="2.6" fill="currentColor"/>
-                        <path d="M6.6 6.6a7.6 7.6 0 0 0 0 10.8M17.4 6.6a7.6 7.6 0 0 1 0 10.8"
-                              stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                      </svg>
-                    </template>
-                  </span>
-
-                  <h3 class="min-w-0 flex-1 truncate text-[14px] font-medium tracking-tight"
-                      :title="device.adapter + ' · ' + device.native_id
-                              + (device.hub_name ? ' · hub: ' + device.hub_name : '')"
-                      x-text="device.name"></h3>
-
-                  <template x-if="!device.online">
-                    <span class="mt-[6px] h-[6px] w-[6px] shrink-0 rounded-full bg-[var(--faint)]"
-                          title="อุปกรณ์ออฟไลน์"></span>
+          <template x-for="cap in ['temperature', 'humidity']" :key="cap">
+            <div x-show="climate(cap)" class="flex flex-col gap-1 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-3 sm:gap-1.5 sm:rounded-[20px] sm:p-5">
+              <span class="text-[12px] text-[var(--muted)] sm:text-[14px]"
+                    x-text="LABEL[cap] + (climate(cap)?.many ? 'เฉลี่ย' : '')"></span>
+              <p class="flex items-baseline gap-1">
+                <span class="text-[26px] font-medium leading-tight tabular-nums sm:text-[40px]"
+                      :style="climate(cap) && 'color: ' + climate(cap).color"
+                      x-text="climate(cap)?.text ?? '—'"></span>
+                <span class="text-[13px] text-[var(--faint)] sm:text-[16px]"
+                      x-text="cap === 'temperature' ? '°C' : '%'"></span>
+              </p>
+              <template x-if="climate(cap)">
+                <span class="mt-auto hidden text-[14px] text-[var(--muted)] sm:block">
+                  <template x-if="climate(cap).many">
+                    <span><span x-text="(cap === 'temperature' ? 'ร้อนสุด ' : 'ชื้นสุด ') + climate(cap).topRoom"></span>
+                      <span :style="'color: ' + climate(cap).topColor"
+                            x-text="climate(cap).topText + (cap === 'temperature' ? '°' : '%')"></span></span>
                   </template>
-
-                  <!-- Shown on hover, and on focus for keyboard users: renaming
-                       is occasional, so the card stays quiet the rest of the time. -->
-                  <button @click="startEdit(device)" title="ตั้งชื่อ / กำหนดห้อง"
-                          class="-mt-1 shrink-0 rounded-lg p-1.5 text-[var(--faint)] opacity-0 transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:opacity-100 group-hover:opacity-100">
-                    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                      <path d="M9.5 3.2 12.8 6.5M3 13h2.6l7-7a1.6 1.6 0 0 0 0-2.3l-1-1a1.6 1.6 0 0 0-2.3 0l-7 7V13Z"
-                            stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                  </button>
-
-                  <template x-if="historyEnabled">
-                    <button @click="openChart(device)" title="ดูกราฟย้อนหลัง"
-                            class="-mr-1 -mt-1 shrink-0 rounded-lg p-1.5 text-[var(--faint)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
-                      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                        <path d="M1.5 11.5 5 7.5l2.8 2.4L14.5 3.5" stroke="currentColor"
-                              stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
-                      </svg>
-                    </button>
-                  </template>
-                </div>
+                  <template x-if="!climate(cap).many"><span x-text="climate(cap).room"></span></template>
+                </span>
               </template>
+            </div>
+          </template>
 
-              <template x-if="editing === device.id">
-                <div class="mb-4 space-y-2" @keydown.escape.stop="cancelEdit()">
-                  <input x-model="draft.name" maxlength="60" placeholder="ชื่ออุปกรณ์"
-                         x-init="$nextTick(() => $el.focus())"
-                         @keydown.enter.stop="saveEdit(device)"
-                         class="w-full rounded-lg bg-[var(--bg)] px-2.5 py-1.5 text-[14px] font-medium outline-none ring-1 ring-[var(--line)] focus:ring-white/25">
-                  <input x-model="draft.room" maxlength="60" placeholder="ห้อง" list="room-names"
-                         @keydown.enter.stop="saveEdit(device)"
-                         class="w-full rounded-lg bg-[var(--bg)] px-2.5 py-1.5 text-[13px] text-[var(--muted)] outline-none ring-1 ring-[var(--line)] focus:ring-white/25">
-                  <div class="flex items-center gap-2 pt-0.5">
-                    <button @click="saveEdit(device)" :disabled="saving"
-                            class="rounded-lg bg-[var(--on)] px-2.5 py-1 text-[12px] font-medium text-black transition-opacity hover:opacity-90 disabled:opacity-50">
-                      บันทึก
+          <!-- On a phone this only takes space when there is something in it. -->
+          <div class="col-span-3 flex-col gap-2 rounded-2xl border p-3.5 sm:gap-2.5 sm:rounded-[20px] sm:p-5 lg:col-span-1 lg:flex"
+               :class="issues.length ? 'flex border-[rgba(230,169,78,.28)] bg-[rgba(230,169,78,.07)]' : 'hidden border-[var(--line)] bg-[var(--surface)]'">
+            <div class="flex items-center gap-2">
+              <span class="text-[13px] font-semibold sm:text-[14px] sm:font-normal"
+                    :class="issues.length ? 'text-[var(--warn-text)] sm:text-[var(--muted)]' : 'text-[var(--muted)]'">ต้องดูแล</span>
+              <span class="rounded-full px-2 text-[13px] font-semibold tabular-nums"
+                    :class="issues.length ? 'bg-[rgba(230,169,78,.16)] text-[var(--warn-text)]' : 'bg-[rgba(75,189,133,.14)] text-[var(--on-text)]'"
+                    x-text="issues.length"></span>
+            </div>
+            <template x-for="it in issues.slice(0, 4)" :key="it.key">
+              <p class="flex items-baseline gap-2.5 text-[14px] leading-snug">
+                <span class="h-2 w-2 shrink-0 translate-y-[-1px] rounded-full" :style="'background: ' + it.color"></span>
+                <span><span x-text="it.text"></span>
+                  <span class="text-[var(--faint)]" x-show="rooms.length > 1" x-text="'· ' + it.room"></span></span>
+              </p>
+            </template>
+            <p class="text-[13px] text-[var(--muted)]" x-show="issues.length > 4"
+               x-text="'และอีก ' + (issues.length - 4) + ' เรื่อง'"></p>
+            <p class="text-[14px] text-[var(--on-text)]" x-show="!issues.length">ทุกอย่างปกติ</p>
+          </div>
+        </section>
+
+        <!-- ── rooms ────────────────────────────────────────────────────── -->
+        <nav aria-label="เลือกห้อง" x-show="rooms.length > 1"
+             class="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 sm:mx-0 sm:flex-wrap sm:px-0">
+          <template x-for="r in ['all'].concat(rooms)" :key="r">
+            <button @click="pickRoom(r)" :aria-pressed="(visibleRooms.length === 1 ? visibleRooms[0] === r : r === 'all') ? 'true' : 'false'"
+                    class="flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-full border px-4 text-[14px] transition-colors sm:h-11 sm:text-[15px]"
+                    :class="(visibleRooms.length === 1 ? visibleRooms[0] === r : r === 'all')
+                      ? 'border-[var(--text)] bg-[var(--text)] text-[var(--bg)]'
+                      : 'border-[var(--line)] bg-[var(--surface)] hover:border-[var(--line-strong)]'">
+              <span x-text="r === 'all' ? 'ทั้งหมด' : r"></span>
+              <span class="hidden text-[13px] tabular-nums opacity-60 sm:inline"
+                    x-text="r === 'all' ? devices.length : byRoom(r).length"></span>
+            </button>
+          </template>
+        </nav>
+
+        <template x-for="room in visibleRooms" :key="room">
+          <section class="flex flex-col gap-2.5 sm:gap-3.5">
+
+            <div class="flex min-h-9 items-center gap-2.5 sm:gap-3">
+              <h2 class="text-[18px] font-semibold tracking-tight sm:text-[20px]" x-text="room"></h2>
+              <span class="min-w-0 truncate text-[13px] text-[var(--faint)] sm:text-[14px]" x-text="roomMeta(room)"></span>
+              <button x-show="switchable.some(d => d.room === room && isOn(d))" @click="roomOff(room)"
+                      class="ml-auto h-9 shrink-0 rounded-[10px] px-2.5 text-[13px] text-[var(--muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)] sm:text-[14px]">
+                ปิดทั้งห้อง
+              </button>
+            </div>
+
+            <div class="grid grid-cols-2 items-start gap-2.5 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
+              <template x-for="device in roomDevices(room)" :key="device.id">
+
+                <!-- Controls take one column on a phone, readings the full row. -->
+                <article class="flex flex-col gap-3 rounded-[18px] border border-[var(--line)] bg-[var(--surface)] p-3.5 transition-colors hover:border-[var(--line-strong)] sm:min-h-[172px] sm:rounded-[20px] sm:p-4"
+                         :class="[isSwitchable(device) ? '' : 'col-span-2 sm:col-span-1', device.online ? '' : 'opacity-55']"
+                         :style="cardStyle(device)">
+
+                  <!-- name. The hub rarely knows what the operator calls a
+                       device, so the card is where a real name gets attached. -->
+                  <template x-if="editing === device.id">
+                    <div class="space-y-2" @keydown.escape.stop="cancelEdit()">
+                      <input x-model="draft.name" maxlength="60" placeholder="ชื่ออุปกรณ์" aria-label="ชื่ออุปกรณ์"
+                             x-init="$nextTick(() => $el.focus())"
+                             @keydown.enter.stop="saveEdit(device)"
+                             class="h-10 w-full rounded-[10px] bg-[var(--bg)] px-3 text-[16px] font-medium outline-none ring-1 ring-[var(--line-strong)] focus:ring-white/40">
+                      <input x-model="draft.room" maxlength="60" placeholder="ห้อง" aria-label="ห้อง" list="room-names"
+                             @keydown.enter.stop="saveEdit(device)"
+                             class="h-10 w-full rounded-[10px] bg-[var(--bg)] px-3 text-[16px] text-[var(--muted)] outline-none ring-1 ring-[var(--line-strong)] focus:ring-white/40">
+                      <div class="flex flex-wrap items-center gap-2 pt-0.5">
+                        <button @click="saveEdit(device)" :disabled="saving"
+                                class="h-9 rounded-[10px] bg-[var(--on)] px-3.5 text-[14px] font-medium text-black transition-opacity hover:opacity-90 disabled:opacity-50">
+                          บันทึก
+                        </button>
+                        <button @click="cancelEdit()"
+                                class="h-9 rounded-[10px] px-3 text-[14px] text-[var(--muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
+                          ยกเลิก
+                        </button>
+                        <template x-if="device.hub_name">
+                          <button @click="resetLabel(device)" :title="'กลับไปใช้ ' + device.hub_name"
+                                  class="ml-auto h-9 rounded-[10px] px-3 text-[13px] text-[var(--faint)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
+                            ใช้ชื่อจาก hub
+                          </button>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+
+                  <template x-if="editing !== device.id">
+                    <!-- A phone puts a control's toggle beside its icon and
+                         the name underneath; a reading keeps one row with
+                         its values on the right. From sm up both run
+                         icon · name · toggle. -->
+                    <div class="relative grid items-center gap-x-3"
+                         :class="isSwitchable(device) ? 'grid-cols-[1fr_auto] gap-y-3.5 sm:min-h-[52px] sm:grid-cols-[auto_1fr_auto]' : 'grid-cols-[auto_1fr_auto] sm:min-h-[52px]'">
+
+                      <!-- Device icon. The glyph says what the thing is, its
+                           colour and glow what it is doing right now. -->
+                      <span class="col-start-1 row-start-1 flex h-[42px] w-[42px] items-center justify-center rounded-xl bg-[var(--surface-hover)] sm:h-12 sm:w-12 sm:rounded-[14px]"
+                            :style="iconBoxStyle(device)">
+                        <span class="dev-icon" :class="iconActive(device) && 'is-active'"
+                              :style="iconStyle(device)" aria-hidden="true">
+                          <template x-if="iconKind(device) === 'light'">
+                            <svg viewBox="0 0 24 24" fill="none">
+                              <g class="rays" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                                <path d="M12 1.5v2M3.9 4.4l1.4 1.4M1.5 12.5h2M20.1 4.4l-1.4 1.4M22.5 12.5h-2"/>
+                              </g>
+                              <path class="glow" fill="currentColor"
+                                    d="M12 4.5a6.2 6.2 0 0 0-3.7 11.2v2.1h7.4v-2.1A6.2 6.2 0 0 0 12 4.5Z"/>
+                              <path d="M12 4.5a6.2 6.2 0 0 0-3.7 11.2v2.1h7.4v-2.1A6.2 6.2 0 0 0 12 4.5Z"
+                                    stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                              <path d="M9.8 20.5h4.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                            </svg>
+                          </template>
+                          <template x-if="iconKind(device) === 'plug'">
+                            <svg viewBox="0 0 24 24" fill="none">
+                              <path class="glow" fill="currentColor" d="M6.5 9.5h11v3.2a5.5 5.5 0 0 1-11 0V9.5Z"/>
+                              <path d="M6.5 9.5h11v3.2a5.5 5.5 0 0 1-11 0V9.5Z"
+                                    stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                              <path d="M9.3 9.5V4.2M14.7 9.5V4.2M12 18.2v2.6"
+                                    stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                            </svg>
+                          </template>
+                          <template x-if="iconKind(device) === 'switch'">
+                            <svg viewBox="0 0 24 24" fill="none">
+                              <rect class="glow" x="6" y="3" width="12" height="18" rx="3" fill="currentColor"/>
+                              <rect x="6" y="3" width="12" height="18" rx="3" stroke="currentColor" stroke-width="1.5"/>
+                              <!-- The rocker itself moves: the one part of the icon
+                                   that mirrors the physical thing being switched. -->
+                              <rect class="lever" x="9" y="12.6" width="6" height="5.4" rx="1.6" fill="currentColor"/>
+                            </svg>
+                          </template>
+                          <template x-if="iconKind(device) === 'contact'">
+                            <svg viewBox="0 0 24 24" fill="none">
+                              <path d="M4 3.5h16v17H4z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                              <path class="panel" d="M12 3.5h8v17h-8z" fill="currentColor" fill-opacity=".18"
+                                    stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                              <circle cx="13.6" cy="12" r=".9" fill="currentColor"/>
+                            </svg>
+                          </template>
+                          <template x-if="iconKind(device) === 'occupancy'">
+                            <svg viewBox="0 0 24 24" fill="none">
+                              <circle class="ping" cx="12" cy="12" r="9.5" stroke="currentColor" stroke-width="1.5"/>
+                              <circle cx="12" cy="8.4" r="2.9" stroke="currentColor" stroke-width="1.5"/>
+                              <path d="M5.8 20.2a6.2 6.2 0 0 1 12.4 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                            </svg>
+                          </template>
+                          <template x-if="iconKind(device) === 'climate'">
+                            <svg viewBox="0 0 24 24" fill="none">
+                              <path d="M9.5 13.8V5a2.2 2.2 0 1 1 4.4 0v8.8a4.6 4.6 0 1 1-4.4 0Z"
+                                    stroke="currentColor" stroke-width="1.5"/>
+                              <path d="M11.7 9.5v6.8" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
+                            </svg>
+                          </template>
+                          <template x-if="iconKind(device) === 'lux'">
+                            <svg viewBox="0 0 24 24" fill="none">
+                              <circle class="glow" cx="12" cy="12" r="4.6" fill="currentColor"/>
+                              <circle cx="12" cy="12" r="4.6" stroke="currentColor" stroke-width="1.5"/>
+                              <g class="rays" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                                <path d="M12 1.8v2.4M12 19.8v2.4M1.8 12h2.4M19.8 12h2.4M4.8 4.8l1.7 1.7M17.5 17.5l1.7 1.7M19.2 4.8l-1.7 1.7M6.5 17.5l-1.7 1.7"/>
+                              </g>
+                            </svg>
+                          </template>
+                          <template x-if="iconKind(device) === 'sensor'">
+                            <svg viewBox="0 0 24 24" fill="none">
+                              <circle cx="12" cy="12" r="2.6" fill="currentColor"/>
+                              <path d="M6.6 6.6a7.6 7.6 0 0 0 0 10.8M17.4 6.6a7.6 7.6 0 0 1 0 10.8"
+                                    stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                            </svg>
+                          </template>
+                        </span>
+                      </span>
+
+                      <div class="flex min-w-0 flex-col gap-px"
+                           :class="isSwitchable(device) ? 'col-span-2 row-start-2 sm:col-span-1 sm:col-start-2 sm:row-start-1' : 'col-start-2 row-start-1'">
+                        <h3 class="truncate text-[15px] font-medium sm:text-[16px]" x-text="device.name"
+                            :title="device.adapter + ' · ' + device.native_id + (device.hub_name ? ' · hub: ' + device.hub_name : '')"></h3>
+                        <template x-if="isSwitchable(device)">
+                          <span class="text-[13px] sm:text-[14px]"
+                                :class="!device.online ? 'text-[var(--danger)]' : isOn(device) ? 'text-[var(--text)]' : 'text-[var(--faint)]'"
+                                x-text="stateText(device)"></span>
+                        </template>
+                      </div>
+
+                      <template x-if="isSwitchable(device)">
+                        <span class="relative col-start-2 row-start-1 h-[26px] w-11 rounded-full transition-colors sm:col-start-3"
+                              :class="[isOn(device) ? 'bg-[var(--on)]' : 'bg-[var(--track)]',
+                                       isPending(device.id, 'switch') ? 'is-pending' : '']"
+                              :style="toggleStyle(device)" aria-hidden="true">
+                          <span class="knob absolute left-[3px] top-[3px] h-5 w-5 rounded-full bg-white shadow-sm"
+                                :class="isOn(device) && 'translate-x-[18px]'"></span>
+                        </span>
+                      </template>
+
+                      <!-- A reading's values, on a phone only: the full row has room for them. -->
+                      <template x-if="!isSwitchable(device)">
+                        <span class="col-start-3 row-start-1 flex items-baseline gap-3 tabular-nums sm:hidden">
+                          <template x-for="(cap, i) in heroCaps(device)" :key="cap">
+                            <span class="font-medium" :class="i === 0 ? 'text-[24px]' : 'text-[17px]'"
+                                  :style="'color: ' + readingColor(device.id, cap)"
+                                  x-text="format(device.id, cap) + (STATE_READ.includes(cap) ? '' : (cap === 'temperature' ? '°' : unit(device.id, cap)))"></span>
+                          </template>
+                        </span>
+                      </template>
+
+                      <!-- The whole top of a control is its switch: an
+                           invisible button over it, so a thumb need not find
+                           the little toggle. -->
+                      <template x-if="isSwitchable(device)">
+                        <button @click="toggle(device)" :disabled="!device.online"
+                                :aria-pressed="isOn(device) ? 'true' : 'false'" :aria-label="device.name"
+                                class="absolute -inset-1.5 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-white/30 disabled:cursor-not-allowed"></button>
+                      </template>
+                    </div>
+                  </template>
+
+                  <!-- sliders, while the lamp is on -->
+                  <template x-for="cap in sliderCaps(device)" :key="cap">
+                    <div :class="isPending(device.id, cap) ? 'is-pending' : ''">
+                      <div class="flex items-baseline justify-between gap-3 text-[13px]">
+                        <span class="text-[var(--muted)]" x-text="LABEL[cap] || cap"></span>
+                        <span class="tabular-nums">
+                          <span x-text="shown(device.id, cap) ?? '—'"></span><span x-text="UNIT[cap] || ''"></span>
+                        </span>
+                      </div>
+                      <input type="range" class="slider w-full"
+                             :min="RANGE[cap][0]" :max="RANGE[cap][1]" :step="RANGE[cap][2]"
+                             :value="shown(device.id, cap) ?? RANGE[cap][0]"
+                             :style="sliderStyle(device, cap)"
+                             :aria-label="(LABEL[cap] || cap) + ' ' + device.name"
+                             @input="slide(device, cap, $event.target.value)">
+                    </div>
+                  </template>
+
+                  <!-- hero readings; on a phone a reading's sit in its header row -->
+                  <template x-if="heroCaps(device).length">
+                    <div class="flex-wrap gap-x-7 gap-y-3" :class="isSwitchable(device) ? 'flex' : 'hidden sm:flex'">
+                      <template x-for="cap in heroCaps(device)" :key="cap">
+                        <div>
+                          <p class="text-[13px] text-[var(--muted)]" x-text="LABEL[cap] || cap"></p>
+                          <p class="font-medium leading-tight tabular-nums"
+                             :class="STATE_READ.includes(cap) ? 'text-[30px]' : 'text-[34px]'"
+                             :style="'color: ' + readingColor(device.id, cap)">
+                            <span x-text="format(device.id, cap)"></span><span
+                              class="ml-0.5 text-[15px] font-normal text-[var(--faint)]" x-text="unit(device.id, cap)"></span>
+                          </p>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+
+                  <!-- secondary readings and staleness, shown only when they
+                       say something, then the card's two occasional actions -->
+                  <div class="mt-auto flex min-h-8 items-center gap-1" x-show="editing !== device.id">
+                    <div class="flex min-w-0 flex-1 flex-wrap gap-x-3 gap-y-0.5">
+                      <template x-for="note in footnote(device)" :key="note.key">
+                        <span class="text-[12px] sm:text-[13px]" :style="'color: ' + note.color" x-text="note.text"></span>
+                      </template>
+                    </div>
+                    <button @click="startEdit(device)" title="ตั้งชื่อ / กำหนดห้อง" :aria-label="'ตั้งชื่อ ' + device.name"
+                            class="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-[var(--faint)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M9.5 3.2 12.8 6.5M3 13h2.6l7-7a1.6 1.6 0 0 0 0-2.3l-1-1a1.6 1.6 0 0 0-2.3 0l-7 7V13Z"
+                              stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                      </svg>
                     </button>
-                    <button @click="cancelEdit()"
-                            class="rounded-lg px-2 py-1 text-[12px] text-[var(--muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
-                      ยกเลิก
-                    </button>
-                    <template x-if="device.hub_name">
-                      <button @click="resetLabel(device)"
-                              :title="'กลับไปใช้ ' + device.hub_name"
-                              class="ml-auto rounded-lg px-2 py-1 text-[12px] text-[var(--faint)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
-                        ใช้ชื่อจาก hub
+                    <template x-if="historyEnabled">
+                      <button @click="openChart(device)" title="ดูกราฟย้อนหลัง" :aria-label="'ดูกราฟย้อนหลัง ' + device.name"
+                              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-[var(--faint)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
+                        <svg width="17" height="17" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                          <path d="M1.5 11.5 5 7.5l2.8 2.4L14.5 3.5" stroke="currentColor"
+                                stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
                       </button>
                     </template>
                   </div>
-                </div>
-              </template>
 
-              <!-- hero readings -->
-              <template x-if="heroCaps(device).length">
-                <div class="mb-1 flex flex-wrap gap-x-9 gap-y-4">
-                  <template x-for="cap in heroCaps(device)" :key="cap">
-                    <div>
-                      <p class="text-[10px] uppercase tracking-[0.14em] text-[var(--faint)]"
-                         x-text="LABEL[cap] || cap"></p>
-                      <p class="mt-1.5 text-[30px] font-medium leading-none tracking-tight tabular-nums"
-                         :style="'color: ' + readingColor(device.id, cap)">
-                        <span x-text="format(device.id, cap)"></span><span
-                          class="ml-1 text-[14px] font-normal text-[var(--faint)]"
-                          x-text="unit(device.id, cap)"></span>
-                      </p>
-                    </div>
-                  </template>
-                </div>
+                </article>
               </template>
-
-              <!-- switch -->
-              <template x-if="device.writable.includes('switch')">
-                <div class="mt-5 flex items-center justify-between gap-4">
-                  <span class="text-[13px] text-[var(--muted)]"
-                        x-text="statusLabel(device.id, 'switch')"></span>
-                  <button @click="toggle(device)" :disabled="!device.online"
-                          :aria-pressed="shown(device.id,'switch') ? 'true' : 'false'"
-                          class="relative h-6 w-11 shrink-0 rounded-full outline-none transition-colors focus-visible:ring-2 focus-visible:ring-white/25 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)] disabled:cursor-not-allowed"
-                          :class="[
-                            shown(device.id,'switch') ? 'bg-[var(--on)]' : 'bg-[var(--track)]',
-                            isPending(device.id,'switch') ? 'is-pending' : ''
-                          ]"
-                          :style="toggleStyle(device)">
-                    <span class="absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white shadow-sm transition-all duration-200"
-                          :class="shown(device.id,'switch') ? 'left-[23px]' : 'left-[3px]'"></span>
-                  </button>
-                </div>
-              </template>
-
-              <!-- sliders -->
-              <template x-for="cap in device.writable.filter(c => c !== 'switch')" :key="cap">
-                <div class="mt-4" :class="isPending(device.id, cap) ? 'is-pending' : ''">
-                  <div class="mb-1 flex items-baseline justify-between gap-3">
-                    <span class="text-[12px] text-[var(--faint)]" x-text="LABEL[cap] || cap"></span>
-                    <span class="text-[12px] tabular-nums text-[var(--muted)]">
-                      <span x-text="shown(device.id, cap) ?? '—'"></span><span x-text="UNIT[cap] || ''"></span>
-                    </span>
-                  </div>
-                  <input type="range" class="slider w-full"
-                         :min="RANGE[cap][0]" :max="RANGE[cap][1]" :step="RANGE[cap][2]"
-                         :disabled="!device.online"
-                         :value="shown(device.id, cap) ?? RANGE[cap][0]"
-                         :style="sliderStyle(device, cap)"
-                         :aria-label="LABEL[cap] || cap"
-                         @input="slide(device, cap, $event.target.value)">
-                </div>
-              </template>
-
-              <!-- secondary readings and staleness: shown only when they say
-                   something. A fresh sensor needs no timestamp. -->
-              <template x-if="footnote(device).length">
-                <div class="mt-5 flex flex-wrap items-center gap-x-4 gap-y-1">
-                  <template x-for="note in footnote(device)" :key="note.key">
-                    <span class="text-[11px]" :style="'color: ' + note.color"
-                          x-text="note.text"></span>
-                  </template>
-                </div>
-              </template>
-
-            </article>
-          </template>
-        </div>
-      </section>
+            </div>
+          </section>
+        </template>
+      </div>
     </template>
   </main>
 
   <!-- ── history ────────────────────────────────────────────────────────── -->
   <div x-show="chart.open" @keydown.escape.window="closeChart()"
-       class="fixed inset-0 z-40 flex items-end justify-center bg-black/60 p-0 backdrop-blur-sm sm:items-center sm:p-6">
-    <div @click.outside="closeChart()"
-         class="w-full max-w-3xl overflow-hidden rounded-t-3xl bg-[#141416] shadow-2xl sm:rounded-2xl">
+       class="fixed inset-0 z-40 flex items-end justify-center bg-black/65 sm:items-center sm:p-6">
+    <div @click.outside="closeChart()" role="dialog" aria-modal="true"
+         :aria-label="'กราฟย้อนหลัง ' + (chart.device?.name || '')"
+         class="max-h-[92vh] w-full max-w-[880px] overflow-y-auto rounded-t-3xl border border-[var(--line)] bg-[var(--panel)] px-4 pb-6 pt-5 sm:rounded-3xl sm:px-8 sm:py-7">
 
-      <div class="flex items-start justify-between gap-4 px-6 pt-6">
+      <div class="flex items-start gap-4">
         <div class="min-w-0">
-          <h3 class="truncate text-[15px] font-medium tracking-tight" x-text="chart.device?.name"></h3>
-          <p class="mt-0.5 text-[12px] text-[var(--faint)]" x-text="chart.device?.room"></p>
+          <h3 class="truncate text-[18px] font-semibold tracking-tight sm:text-[20px]" x-text="chart.device?.name"></h3>
+          <p class="mt-0.5 text-[14px] text-[var(--muted)]" x-text="chart.device?.room"></p>
         </div>
         <button @click="closeChart()" aria-label="ปิด"
-                class="-mr-2 -mt-1 rounded-lg p-2 text-[var(--faint)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-            <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                class="ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--surface-2)] transition-colors hover:bg-[var(--surface-hover)]">
+          <svg width="15" height="15" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
           </svg>
         </button>
       </div>
 
-      <div class="mt-5 flex flex-wrap items-center gap-x-1 gap-y-2 px-6">
-        <template x-for="cap in (chart.device?.capabilities || [])" :key="cap">
-          <button @click="pickCapability(cap)"
-                  class="rounded-full px-3 py-1 text-[12px] transition-colors"
-                  :class="chart.capability === cap
-                    ? 'bg-[var(--surface-hover)] text-[var(--text)]'
-                    : 'text-[var(--faint)] hover:text-[var(--muted)]'"
-                  x-text="LABEL[cap] || cap"></button>
-        </template>
-        <div class="ml-auto flex gap-1">
+      <div class="mt-5 flex flex-wrap items-center gap-3">
+        <div role="group" aria-label="ค่าที่แสดง" class="no-scrollbar flex max-w-full gap-1 overflow-x-auto rounded-[14px] bg-[var(--surface-2)] p-1">
+          <template x-for="cap in (chart.device?.capabilities || [])" :key="cap">
+            <button @click="pickCapability(cap)" :aria-pressed="chart.capability === cap ? 'true' : 'false'"
+                    class="h-[38px] shrink-0 whitespace-nowrap rounded-[10px] px-3.5 text-[14px] transition-colors"
+                    :class="chart.capability === cap ? 'bg-[var(--text)] text-[var(--bg)]' : 'text-[var(--muted)] hover:text-[var(--text)]'"
+                    x-text="LABEL[cap] || cap"></button>
+          </template>
+        </div>
+        <div role="group" aria-label="ช่วงเวลา" class="flex gap-1 rounded-[14px] bg-[var(--surface-2)] p-1 sm:ml-auto">
           <template x-for="r in RANGES" :key="r.hours">
-            <button @click="pickRange(r.hours)"
-                    class="rounded-full px-2.5 py-1 text-[12px] tabular-nums transition-colors"
-                    :class="chart.hours === r.hours
-                      ? 'bg-[var(--surface-hover)] text-[var(--text)]'
-                      : 'text-[var(--faint)] hover:text-[var(--muted)]'"
+            <button @click="pickRange(r.hours)" :aria-pressed="chart.hours === r.hours ? 'true' : 'false'"
+                    class="h-[38px] min-w-[48px] rounded-[10px] px-2.5 text-[14px] tabular-nums transition-colors"
+                    :class="chart.hours === r.hours ? 'bg-[var(--text)] text-[var(--bg)]' : 'text-[var(--muted)] hover:text-[var(--text)]'"
                     x-text="r.label"></button>
           </template>
         </div>
       </div>
 
-      <div class="px-6 pb-6 pt-5">
-        <div class="relative h-64">
-          <canvas x-ref="canvas"></canvas>
-          <template x-if="chart.loading">
-            <div class="absolute inset-0 flex items-center justify-center text-[13px] text-[var(--faint)]">
-              กำลังโหลด…
-            </div>
-          </template>
-          <template x-if="!chart.loading && !chart.error && chart.data && chart.data.points.length === 0">
-            <div class="absolute inset-0 flex items-center justify-center text-[13px] text-[var(--faint)]">
-              ยังไม่มีข้อมูลในช่วงเวลานี้
-            </div>
-          </template>
-          <template x-if="chart.error">
-            <div class="absolute inset-0 flex items-center justify-center px-8 text-center text-[13px]"
-                 style="color: var(--danger)" x-text="chart.error"></div>
-          </template>
-        </div>
+      <div x-ref="plot" class="relative mt-5 h-[240px] select-none sm:h-[280px]"
+           @pointermove="hoverChart($event)" @pointerleave="chart.hover = null">
+        <template x-if="chart.geo">
+          <div class="absolute inset-0">
+            <svg :width="chart.geo.w" :height="chart.geo.h" :viewBox="'0 0 ' + chart.geo.w + ' ' + chart.geo.h"
+                 class="block" role="img" :aria-label="'กราฟ' + (LABEL[chart.capability] || chart.capability) + 'ย้อนหลัง'">
+              <path :d="chart.geo.grid" stroke="var(--line)" fill="none"/>
+              <path :d="chart.geo.band" :fill="chart.geo.fill"/>
+              <path :d="chart.geo.line" fill="none" :stroke="chart.geo.stroke" stroke-width="2"
+                    stroke-linejoin="round" stroke-linecap="round"/>
+              <line x-show="chart.hover" :x1="chart.hover?.x" :x2="chart.hover?.x" :y1="chart.geo.T" :y2="chart.geo.B"
+                    stroke="var(--line-strong)"/>
+              <circle x-show="chart.hover || chart.geo.last"
+                      :cx="(chart.hover || chart.geo.last)?.x" :cy="(chart.hover || chart.geo.last)?.y"
+                      r="5" :fill="chart.geo.stroke" stroke="var(--panel)" stroke-width="3"/>
+            </svg>
+            <template x-for="t in chart.geo.yLabels" :key="t.key">
+              <span class="absolute left-0 w-9 -translate-y-1/2 text-right text-[12px] tabular-nums text-[var(--faint)]"
+                    :style="'top: ' + t.top + 'px'" x-text="t.text"></span>
+            </template>
+            <template x-for="t in chart.geo.xLabels" :key="t.key">
+              <span class="absolute bottom-0 whitespace-nowrap text-[12px] text-[var(--faint)]"
+                    :class="t.align === 'start' ? '' : t.align === 'end' ? '-translate-x-full' : '-translate-x-1/2'"
+                    :style="'left: ' + t.left + 'px'" x-text="t.text"></span>
+            </template>
+            <template x-if="chart.hover">
+              <div class="pointer-events-none absolute -translate-x-1/2 translate-y-[calc(-100%_-_12px)] whitespace-nowrap rounded-[10px] border border-[var(--line-strong)] bg-[var(--surface-2)] px-2.5 py-1.5 text-center"
+                   :style="'left: ' + chart.hover.left + 'px; top: ' + Math.max(chart.hover.y, 52) + 'px'">
+                <p class="text-[15px] font-medium tabular-nums" x-text="chart.hover.text"></p>
+                <p class="text-[12px] text-[var(--muted)]" x-text="chart.hover.when"></p>
+              </div>
+            </template>
+          </div>
+        </template>
+        <template x-if="chart.loading && !chart.geo">
+          <div class="absolute inset-0 flex items-center justify-center text-[14px] text-[var(--faint)]">กำลังโหลด…</div>
+        </template>
+        <template x-if="!chart.loading && !chart.error && chart.data && chart.data.points.length === 0">
+          <div class="absolute inset-0 flex items-center justify-center text-[14px] text-[var(--faint)]">
+            ยังไม่มีข้อมูลในช่วงเวลานี้
+          </div>
+        </template>
+        <template x-if="chart.error">
+          <div class="absolute inset-0 flex items-center justify-center px-8 text-center text-[14px] text-[var(--danger)]"
+               x-text="chart.error"></div>
+        </template>
+      </div>
 
-        <div class="mt-6 flex flex-wrap items-end gap-x-10 gap-y-3 border-t border-[var(--line)] pt-5">
-          <template x-for="s in summary" :key="s.label">
-            <div>
-              <p class="text-[10px] uppercase tracking-[0.14em] text-[var(--faint)]" x-text="s.label"></p>
-              <p class="mt-1 text-[17px] font-medium tabular-nums"
-                 :style="'color: ' + s.color" x-text="s.value"></p>
-            </div>
-          </template>
-          <p class="ml-auto text-[11px] text-[var(--faint)]" x-text="chartSource"></p>
+      <div class="mt-5 flex flex-wrap items-end gap-x-10 gap-y-4 border-t border-[var(--line)] pt-5">
+        <template x-for="s in summary" :key="s.label">
+          <div>
+            <p class="text-[13px] text-[var(--muted)]" x-text="s.label"></p>
+            <p class="mt-0.5 text-[22px] font-medium tabular-nums sm:text-[24px]" :style="'color: ' + s.color" x-text="s.value"></p>
+          </div>
+        </template>
+        <div class="flex flex-col gap-1.5 sm:ml-auto sm:items-end">
+          <p class="flex items-center gap-2 text-[13px] text-[var(--muted)]" x-show="chart.geo?.band">
+            <span class="h-2.5 w-[18px] rounded-[3px]" :style="'background: ' + chart.geo?.fill"></span>
+            ช่วงที่ค่าแกว่ง (ต่ำสุด–สูงสุดในช่วงนั้น)
+          </p>
+          <p class="text-[13px] text-[var(--faint)]" x-text="chartSource"></p>
         </div>
       </div>
     </div>
   </div>
 
   <!-- ── toasts ─────────────────────────────────────────────────────────── -->
-  <div class="pointer-events-none fixed inset-x-4 bottom-4 z-50 flex flex-col items-center gap-2 sm:inset-x-auto sm:right-6 sm:bottom-6 sm:items-end">
+  <div class="pointer-events-none fixed inset-x-4 bottom-4 z-50 flex flex-col items-center gap-2 sm:inset-x-auto sm:bottom-6 sm:right-6 sm:items-end"
+       role="status" aria-live="polite">
     <template x-for="t in toasts" :key="t.id">
-      <div class="w-full max-w-sm rounded-xl bg-[#1a1a1d] px-4 py-3 shadow-xl ring-1 ring-white/[.06]">
-        <p class="text-[13px] font-medium"
-           :style="t.kind === 'error' ? 'color: var(--danger)' : 'color: var(--on)'"
-           x-text="t.title"></p>
-        <p class="mt-0.5 text-[12px] leading-snug text-[var(--muted)]" x-text="t.body"></p>
+      <div class="w-full max-w-sm rounded-2xl border border-[var(--line-strong)] bg-[var(--surface-2)] px-4 py-3 shadow-xl">
+        <p class="text-[14px] font-medium"
+           :class="t.kind === 'error' ? 'text-[var(--danger-text)]' : 'text-[var(--on-text)]'" x-text="t.title"></p>
+        <p class="mt-0.5 text-[13px] leading-snug text-[var(--muted)]" x-text="t.body"></p>
       </div>
     </template>
   </div>
+
   <!-- ── account ────────────────────────────────────────────────────────── -->
-  <!-- Opaque, like the chart dialog: the see-through --surface let the device
-       cards show through behind the text and made it hard to read. Body text
-       is --muted rather than --faint for the same reason; --faint is for
-       labels you glance past, not sentences you have to read. -->
+  <!-- Opaque, like the chart dialog, so the cards do not show through the
+       text. Body text is --muted rather than --faint: --faint is for labels
+       you glance past, not sentences you have to read. -->
   <template x-if="account.open">
-    <div class="fixed inset-0 z-30 flex items-start justify-center bg-black/60 px-6 pt-24 backdrop-blur-sm"
+    <div class="fixed inset-0 z-30 flex items-start justify-center bg-black/65 px-4 pt-20 sm:px-6 sm:pt-24"
          @click.self="account.open = false" @keydown.escape.window="account.open = false">
-      <div class="w-full max-w-[360px] rounded-2xl bg-[#141416] p-6 shadow-2xl ring-1 ring-white/[.08]">
-        <h2 class="text-[16px] font-semibold tracking-tight">เปลี่ยนรหัสผ่าน</h2>
-        <p class="mt-1.5 text-[13px] leading-relaxed text-[var(--muted)]">
+      <div role="dialog" aria-modal="true" aria-labelledby="account-title"
+           class="w-full max-w-[380px] rounded-3xl border border-[var(--line)] bg-[var(--panel)] p-6 shadow-2xl">
+        <h2 id="account-title" class="text-[18px] font-semibold tracking-tight">เปลี่ยนรหัสผ่าน</h2>
+        <p class="mt-1.5 text-[14px] leading-relaxed text-[var(--muted)]">
           เปลี่ยนแล้วเบราว์เซอร์อื่นทุกเครื่องจะถูกให้ออกจากระบบ ยกเว้นเครื่องนี้
         </p>
 
         <div class="mt-5 space-y-3">
           <label class="block">
-            <span class="mb-1.5 block text-[13px] text-[var(--text)]">รหัสผ่านปัจจุบัน</span>
+            <span class="mb-1.5 block text-[14px]">รหัสผ่านปัจจุบัน</span>
             <input x-model="account.current" type="password" autocomplete="current-password"
                    :disabled="account.busy"
-                   class="w-full rounded-lg bg-[var(--bg)] px-3 py-2.5 text-[16px] text-[var(--text)] outline-none ring-1 ring-white/[.12] focus:ring-white/40 disabled:opacity-50">
+                   class="h-11 w-full rounded-xl bg-[var(--bg)] px-3 text-[16px] outline-none ring-1 ring-[var(--line-strong)] focus:ring-white/40 disabled:opacity-50">
           </label>
           <label class="block">
-            <span class="mb-1.5 block text-[13px] text-[var(--text)]">รหัสผ่านใหม่</span>
+            <span class="mb-1.5 block text-[14px]">รหัสผ่านใหม่</span>
             <input x-model="account.next" type="password" autocomplete="new-password"
-                   :disabled="account.busy"
-                   @keydown.enter="changePassword()"
-                   class="w-full rounded-lg bg-[var(--bg)] px-3 py-2.5 text-[16px] text-[var(--text)] outline-none ring-1 ring-white/[.12] focus:ring-white/40 disabled:opacity-50">
-            <span class="mt-1.5 block text-[12px] text-[var(--muted)]">อย่างน้อย 10 ตัวอักษร</span>
+                   :disabled="account.busy" @keydown.enter="changePassword()"
+                   class="h-11 w-full rounded-xl bg-[var(--bg)] px-3 text-[16px] outline-none ring-1 ring-[var(--line-strong)] focus:ring-white/40 disabled:opacity-50">
+            <span class="mt-1.5 block text-[13px] text-[var(--muted)]">อย่างน้อย 10 ตัวอักษร</span>
           </label>
         </div>
 
         <template x-if="account.error">
-          <p class="mt-3 text-[13px] text-[var(--danger)]" x-text="account.error"></p>
+          <p class="mt-3 text-[14px] text-[var(--danger-text)]" x-text="account.error"></p>
         </template>
         <template x-if="account.done">
-          <p class="mt-3 text-[13px] text-[var(--on)]">เปลี่ยนรหัสผ่านแล้ว</p>
+          <p class="mt-3 text-[14px] text-[var(--on-text)]">เปลี่ยนรหัสผ่านแล้ว</p>
         </template>
 
         <div class="mt-5 flex items-center gap-2">
           <button @click="changePassword()" :disabled="account.busy || !account.current || !account.next"
-                  class="rounded-lg bg-[var(--on)] px-4 py-2 text-[14px] font-medium text-black transition-opacity hover:opacity-90 disabled:opacity-40">
+                  class="h-11 rounded-xl bg-[var(--on)] px-5 text-[15px] font-medium text-black transition-opacity hover:opacity-90 disabled:opacity-40">
             <span x-text="account.busy ? 'กำลังบันทึก…' : 'บันทึก'"></span>
           </button>
           <button @click="account.open = false"
-                  class="rounded-lg px-3 py-2 text-[14px] text-[var(--muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
+                  class="h-11 rounded-xl px-4 text-[15px] text-[var(--muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">
             ปิด
           </button>
         </div>
 
         <!-- Separate from changing the password: for a phone left signed in
              somewhere, there is no reason to invent a new password. -->
-        <div class="mt-6 border-t border-white/[.08] pt-5">
-          <p class="text-[13px] leading-relaxed text-[var(--muted)]">
+        <div class="mt-6 border-t border-[var(--line)] pt-5">
+          <p class="text-[14px] leading-relaxed text-[var(--muted)]">
             ลืมออกจากระบบบนเครื่องอื่น? ให้ทุกเครื่องหลุดพร้อมกัน รวมเครื่องนี้ด้วย
             โดยไม่ต้องเปลี่ยนรหัสผ่าน
           </p>
           <button @click="logoutAll()" :disabled="loggingOut"
-                  class="mt-3 rounded-lg px-3 py-2 text-[14px] text-[var(--danger)] ring-1 ring-white/[.12] transition-colors hover:bg-[var(--surface-hover)] disabled:opacity-50">
+                  class="mt-3 h-11 rounded-xl px-4 text-[15px] text-[var(--danger-text)] ring-1 ring-[var(--line-strong)] transition-colors hover:bg-[var(--surface-hover)] disabled:opacity-50">
             ออกจากระบบทุกเครื่อง
           </button>
         </div>

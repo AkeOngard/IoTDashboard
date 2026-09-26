@@ -1,7 +1,7 @@
 # IoT Control Gateway
 
 Monitor เซนเซอร์และควบคุมอุปกรณ์ Zigbee ผ่าน **Matter** (local control)
-FastAPI + WebSocket ฝั่งหลัง, Tailwind + Alpine.js + Chart.js ฝั่งหน้า — ทุกไฟล์เสิร์ฟจากเครื่องเอง ไม่พึ่ง CDN
+FastAPI + WebSocket ฝั่งหลัง, Tailwind + Alpine.js ฝั่งหน้า (กราฟวาดเป็น SVG เอง) — ทุกไฟล์เสิร์ฟจากเครื่องเอง ไม่พึ่ง CDN
 (`static/tailwind.css` commit ไว้แล้ว แก้ class ใน `templates/` หรือ `static/` แล้วรัน `make css` — ต้องมี Node)
 
 โครงสร้างและชื่อไฟล์อ้างอิงจาก `IoT-project.html` (Project Documentation v1.0)
@@ -21,7 +21,7 @@ Zigbee devices ──► Zemismart M1 (Zigbee→Matter bridge)
           Recorder (deadband + heartbeat)   FastAPI (REST + WebSocket)
                         │                        │
              TimescaleDB hypertable      templates/ + static/
-             + telemetry_5m rollup ─────► Chart.js
+             + telemetry_5m rollup ─────► กราฟ SVG
 ```
 
 ## โครงสร้างโปรเจกต์

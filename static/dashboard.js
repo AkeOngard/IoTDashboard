@@ -3,6 +3,11 @@
  *
  * Display principle: show a number only where a number is the point, and show
  * secondary facts (battery, staleness) only when they are worth a glance.
+ *
+ * Everything on this page is worked out here, in the viewer's browser, from
+ * the one WebSocket stream the server already sends: the overview, the
+ * "needs attention" list and the history chart cost the Pi nothing beyond
+ * the messages it was sending anyway.
  */
 function dashboard() {
   return {
@@ -15,7 +20,7 @@ function dashboard() {
     LABEL: {
       temperature: 'อุณหภูมิ', humidity: 'ความชื้น', illuminance: 'ความสว่าง',
       battery: 'แบตเตอรี่', contact: 'หน้าต่าง/ประตู', occupancy: 'ตรวจจับคน',
-      brightness: 'ความสว่างไฟ', color_temp: 'อุณหภูมิสี', switch: 'สวิตช์',
+      brightness: 'ความสว่างไฟ', color_temp: 'โทนแสง', switch: 'สวิตช์',
     },
     UNIT: { brightness: '%', color_temp: 'K' },
     CHART_UNIT: {
@@ -41,33 +46,62 @@ function dashboard() {
                     [100, [75, 189, 133]]],
     },
     FLAT: { illuminance: [237, 201, 92] },
+    // State colours as rgb triples, for tints that need an alpha.
+    TONE: { on: [75, 189, 133], open: [230, 169, 78], occupied: [169, 139, 245] },
 
     // Endpoints of the Kelvin gradient used by lamp tints and the CT slider.
     K_WARM: [255, 172, 92],
     K_COOL: [198, 224, 255],
-    RANGE: { brightness: [0, 100, 1], color_temp: [2200, 6500, 100] },
+    RANGE: { brightness: [1, 100, 1], color_temp: [2200, 6500, 100] },
     RANGES: [
       { label: '1ชม', hours: 1 }, { label: '6ชม', hours: 6 },
-      { label: '24ชม', hours: 24 }, { label: '7ว', hours: 168 },
-      { label: '30ว', hours: 720 },
+      { label: '24ชม', hours: 24 }, { label: '7วัน', hours: 168 },
+      { label: '30วัน', hours: 720 },
     ],
     // Thresholds that tint a reading amber. Tune per deployment.
     ALERT: { temperature: [null, 32], humidity: [30, 70], battery: [20, null] },
+    // At or below this a battery makes the "needs attention" list.
+    LOW_BATTERY: 20,
     // A sensor quieter than this has something wrong with it, not a stable value:
     // the recorder heartbeats every 5 minutes even when nothing changes.
     STALE_SECONDS: 600,
+    /* The chart shades a bucket's min-to-max only where the spread is wider
+     * than this: a swing worth seeing, like a window opened for ten minutes.
+     * Below it the spread is sensor noise, and a band there is just a glow
+     * tracing the line. Capabilities not listed use 15% of the chart's span. */
+    SWING: { temperature: 1, humidity: 5, battery: 2, illuminance: 50, brightness: 10, color_temp: 300 },
+    // Gap between the commands of "turn everything off", so a room full of
+    // lamps does not hit the Zigbee mesh in one burst.
+    BULK_GAP_MS: 150,
 
     devices: [], states: {}, pending: {}, toasts: [],
+    // Which room the chips show; 'all' for every room.
+    room: 'all',
     // The card being renamed, and the draft being typed into it.
-    editing: null, draft: { name: '', room: '' }, saving: false,
+    editing: null, draft: { name: '', room: '' }, saving: false, refreshing: false,
     socket: false, adapterConnected: false, adapterName: '—', historyEnabled: false,
-    chart: { open: false, device: null, capability: null, hours: 24, loading: false, data: null, error: null },
-    _ws: null, _backoff: 1000, _timers: {}, _toastSeq: 0, _tick: 0, _chartjs: null, _reqSeq: 0,
+    chart: {
+      open: false, device: null, capability: null, hours: 24,
+      loading: false, data: null, error: null, geo: null, hover: null,
+    },
+    _ws: null, _backoff: 1000, _timers: {}, _toastSeq: 0, _tick: 0, _reqSeq: 0, _raf: 0,
 
     init() {
+      try { this.room = localStorage.getItem('iot.room') || 'all'; } catch (e) { /* private mode */ }
       this.connect();
       // Drives the relative staleness labels.
       setInterval(() => { this._tick++; }, 15000);
+      // The chart is drawn to its box's real size, so redraw whenever that
+      // changes -- including the moment the dialog first lays out, which is
+      // after the data may already have arrived.
+      this.$nextTick(() => {
+        if (!window.ResizeObserver || !this.$refs.plot) return;
+        new ResizeObserver(() => {
+          if (!this.chart.open || !this.chart.data) return;
+          cancelAnimationFrame(this._raf);
+          this._raf = requestAnimationFrame(() => this.draw());
+        }).observe(this.$refs.plot);
+      });
     },
 
     connect() {
@@ -134,6 +168,42 @@ function dashboard() {
       return [...new Set(this.devices.map(d => d.room))].sort();
     },
 
+    /** The rooms the chips leave on screen. A remembered room that has since
+     *  been emptied or renamed falls back to showing everything. */
+    get visibleRooms() {
+      return this.rooms.includes(this.room) ? [this.room] : this.rooms;
+    },
+
+    pickRoom(room) {
+      this.room = room;
+      try { localStorage.setItem('iot.room', room); } catch (e) { /* private mode */ }
+    },
+
+    /** Controls first, readings after: on a phone the controls pair up two to
+     *  a row and the sensors take the full width underneath. */
+    roomDevices(room) {
+      const list = this.byRoom(room);
+      return list.filter(d => this.isSwitchable(d)).concat(list.filter(d => !this.isSwitchable(d)));
+    },
+
+    /** "2 on · 27.4°C · 58%": what a glance at a room heading should tell you. */
+    roomMeta(room) {
+      const list = this.byRoom(room);
+      const parts = [];
+      if (list.some(d => this.isSwitchable(d))) {
+        const on = list.filter(d => d.online && this.isOn(d)).length;
+        parts.push(on ? `เปิดอยู่ ${on}` : 'ปิดหมด');
+      }
+      const climate = list.find(d => typeof this.value(d.id, 'temperature') === 'number');
+      if (climate) {
+        let text = `${this.value(climate.id, 'temperature')}°C`;
+        const h = this.value(climate.id, 'humidity');
+        if (typeof h === 'number') text += ` · ${h}%`;
+        parts.push(text);
+      }
+      return parts.join(' · ');
+    },
+
     /** One status line beats three indicators: report the worst thing that is
      *  true, and stay quiet when everything is fine. */
     get health() {
@@ -141,6 +211,15 @@ function dashboard() {
       if (!this.adapterConnected) return { tone: 'warn', text: `กำลังเชื่อมต่อ ${this.adapterName}` };
       if (!this.historyEnabled) return { tone: 'muted', text: 'ทำงานปกติ · ไม่บันทึกประวัติ' };
       return { tone: 'on', text: 'ทำงานปกติ' };
+    },
+
+    get healthStyle() {
+      return {
+        on:     'background-color: rgb(75 189 133 / .12); color: var(--on-text)',
+        warn:   'background-color: rgb(230 169 78 / .12); color: var(--warn-text)',
+        danger: 'background-color: rgb(236 122 102 / .12); color: var(--danger-text)',
+        muted:  'background-color: var(--surface-2); color: var(--muted)',
+      }[this.health.tone];
     },
 
     /** Confirmed value straight from the device. */
@@ -158,6 +237,9 @@ function dashboard() {
 
     isPending(id, cap) { return this.key(id, cap) in this.pending; },
 
+    isSwitchable(device) { return device.writable.includes('switch'); },
+    isOn(device) { return this.shown(device.id, 'switch') === true; },
+
     unit(id, cap) {
       const s = this.states[this.key(id, cap)];
       return s ? s.unit : (this.UNIT[cap] || '');
@@ -166,7 +248,7 @@ function dashboard() {
     format(id, cap) {
       const v = this.shown(id, cap);
       if (v === null || v === undefined) return '—';
-      if (cap === 'contact') return v ? 'ปิด' : 'เปิด';
+      if (cap === 'contact') return v ? 'ปิดสนิท' : 'เปิดอยู่';
       if (cap === 'occupancy') return v ? 'มีคน' : 'ว่าง';
       return typeof v === 'number' ? v.toLocaleString('th-TH') : v;
     },
@@ -175,6 +257,65 @@ function dashboard() {
       const range = this.ALERT[cap], v = this.value(id, cap);
       if (!range || typeof v !== 'number') return false;
       return (range[0] !== null && v < range[0]) || (range[1] !== null && v > range[1]);
+    },
+
+    // ----------------------------------------------------------- overview
+
+    /** Online devices with an on/off switch: what "turn everything off" acts on. */
+    get switchable() {
+      return this.devices.filter(d => d.online && this.isSwitchable(d));
+    },
+
+    get onCount() {
+      return this.switchable.filter(d => this.isOn(d)).length;
+    },
+
+    /** Average and extreme of one reading across the house, or null when no
+     *  online device reports it. */
+    climate(cap) {
+      const rows = this.devices
+        .filter(d => d.online)
+        .map(d => ({ d, v: this.value(d.id, cap) }))
+        .filter(r => typeof r.v === 'number');
+      if (!rows.length) return null;
+      const avg = rows.reduce((sum, r) => sum + r.v, 0) / rows.length;
+      const top = rows.reduce((m, r) => (r.v > m.v ? r : m));
+      const color = (v) => this.rgb(this.ramp(this.RAMP[cap], v));
+      return {
+        text: cap === 'temperature' ? avg.toFixed(1) : String(Math.round(avg)),
+        color: color(avg),
+        many: rows.length > 1,
+        room: rows[0].d.room,
+        topRoom: top.d.room,
+        topText: cap === 'temperature' ? top.v.toFixed(1) : String(Math.round(top.v)),
+        topColor: color(top.v),
+      };
+    },
+
+    /** Everything worth a look, gathered in one place so nobody has to scan
+     *  every card for it: a window left open, a device gone quiet or
+     *  unreachable, a battery about to die. */
+    get issues() {
+      this._tick; // staleness moves with the clock
+      const out = [];
+      for (const d of this.devices) {
+        if (!d.online) {
+          out.push({ key: d.id + ':offline', text: `${d.name} ออฟไลน์`, room: d.room, color: 'var(--danger)' });
+          continue;
+        }
+        if (d.capabilities.includes('contact') && this.value(d.id, 'contact') === false) {
+          out.push({ key: d.id + ':open', text: `${d.name} เปิดอยู่`, room: d.room, color: 'var(--warn)' });
+        }
+        const battery = this.value(d.id, 'battery');
+        if (typeof battery === 'number' && battery <= this.LOW_BATTERY) {
+          out.push({ key: d.id + ':battery', text: `แบต ${d.name} เหลือ ${battery}%`, room: d.room, color: 'var(--warn)' });
+        }
+        const stale = this.staleness(d);
+        if (stale && stale.color === 'var(--warn)') {
+          out.push({ key: d.id + ':stale', text: `${d.name} ${stale.text}`, room: d.room, color: 'var(--warn)' });
+        }
+      }
+      return out;
     },
 
     // ------------------------------------------------------------- colour
@@ -199,38 +340,84 @@ function dashboard() {
     },
 
     rgb(c) { return `rgb(${c[0]} ${c[1]} ${c[2]})`; },
+    rgba(c, a) { return `rgb(${c[0]} ${c[1]} ${c[2]} / ${a})`; },
 
     /** The colour a reading should be drawn in. */
     readingColor(id, cap) {
       const v = this.shown(id, cap);
       if (v === null || v === undefined) return 'var(--faint)';
-      if (cap === 'contact')   return v ? 'var(--text)' : 'var(--c-warm)';   // open is worth noticing
-      if (cap === 'occupancy') return v ? 'var(--c-state)' : 'var(--faint)';
+      if (cap === 'contact')   return v ? 'var(--text)' : 'var(--warn)';   // open is worth noticing
+      if (cap === 'occupancy') return v ? 'var(--c-state)' : 'var(--text)';
       if (this.FLAT[cap]) return this.rgb(this.FLAT[cap]);
       const stops = this.RAMP[cap];
       if (stops && typeof v === 'number') return this.rgb(this.ramp(stops, v));
       return 'var(--text)';
     },
 
-    /** A lit lamp tints its own card with the colour it is actually showing. */
-    cardTint(device) {
-      if (!device.writable.includes('switch') || !this.shown(device.id, 'switch')) return '';
-      if (device.kind !== 'light') {
-        return 'background-image: radial-gradient(130% 110% at 88% -15%, rgba(75,189,133,.07), transparent 62%)';
+    /* The one colour a card is "about" right now, or null when it is at rest:
+     * the light a lamp is actually making, green for a live plug, amber for
+     * an open window, the temperature for a climate sensor. The icon, its
+     * box, the card's tint and the toggle all draw from this. */
+    tone(device) {
+      if (!device.online) return null;
+      if (this.isSwitchable(device)) {
+        if (!this.isOn(device)) return null;
+        return device.kind === 'light'
+          ? this.kelvinRgb(this.shown(device.id, 'color_temp'))
+          : this.TONE.on;
       }
-      const [r, g, b] = this.kelvinRgb(this.shown(device.id, 'color_temp'));
-      const level = this.shown(device.id, 'brightness');
-      const alpha = (0.05 + 0.11 * ((typeof level === 'number' ? level : 100) / 100)).toFixed(3);
-      return `background-image: radial-gradient(130% 110% at 88% -15%, rgba(${r},${g},${b},${alpha}), transparent 62%)`;
+      const kind = this.iconKind(device);
+      if (kind === 'contact') return this.shown(device.id, 'contact') === false ? this.TONE.open : null;
+      if (kind === 'occupancy') return this.shown(device.id, 'occupancy') === true ? this.TONE.occupied : null;
+      if (kind === 'climate') {
+        const t = this.value(device.id, 'temperature');
+        if (typeof t === 'number') return this.ramp(this.RAMP.temperature, t);
+        const h = this.value(device.id, 'humidity');
+        return typeof h === 'number' ? this.ramp(this.RAMP.humidity, h) : null;
+      }
+      if (kind === 'lux') {
+        return typeof this.value(device.id, 'illuminance') === 'number' ? this.FLAT.illuminance : null;
+      }
+      return null;
     },
 
-    /** An on lamp's toggle wears the lamp's colour; darkened so the white knob
+    /** A lit lamp tints its own card with the colour it is making; an open
+     *  window only outlines it. Low alpha, so a room full of lights still
+     *  reads as a calm grid rather than a set of coloured billboards. */
+    cardStyle(device) {
+      const tone = this.tone(device);
+      if (!tone) return '';
+      if (this.isSwitchable(device)) {
+        return `background-color: ${this.rgba(tone, .08)}; border-color: ${this.rgba(tone, .32)}`;
+      }
+      if (this.iconKind(device) === 'contact') return `border-color: ${this.rgba(tone, .32)}`;
+      return '';
+    },
+
+    iconBoxStyle(device) {
+      const tone = this.tone(device);
+      return tone ? `background-color: ${this.rgba(tone, .16)}` : '';
+    },
+
+    /** The icon's colour and how hard it glows. A warm lamp at 10% looks like
+     *  a warm lamp at 10%. */
+    iconStyle(device) {
+      const tone = this.tone(device);
+      if (!tone) return '';
+      let glow = 0.2;
+      if (device.kind === 'light') {
+        const level = this.shown(device.id, 'brightness');
+        glow = 0.12 + 0.30 * ((typeof level === 'number' ? level : 100) / 100);
+      }
+      return `color: ${this.rgb(tone)}; --glow: ${glow.toFixed(2)}`;
+    },
+
+    /** An on toggle wears the device's colour, darkened so the white knob
      *  stays legible at 6500K. Returns '' when off, letting the class win. */
     toggleStyle(device) {
-      if (!this.shown(device.id, 'switch')) return '';
-      if (device.kind !== 'light') return '';
-      const [r, g, b] = this.kelvinRgb(this.shown(device.id, 'color_temp'));
-      return `background-color: rgb(${Math.round(r * .74)} ${Math.round(g * .74)} ${Math.round(b * .8)})`;
+      const tone = this.tone(device);
+      if (!tone || !this.isSwitchable(device)) return '';
+      return `background-color: rgb(${Math.round(tone[0] * .74)} ${Math.round(tone[1] * .74)} ${Math.round(tone[2] * .8)})`;
     },
 
     /** Brightness fades up to the lamp's colour; colour temperature is a real
@@ -245,7 +432,7 @@ function dashboard() {
         const lamp = device.capabilities.includes('color_temp')
           ? this.rgb(this.kelvinRgb(this.shown(device.id, 'color_temp')))
           : this.rgb(this.K_WARM);
-        return `--track-img: linear-gradient(90deg, rgba(255,255,255,.09), ${lamp})`;
+        return `--track-img: linear-gradient(90deg, var(--track), ${lamp})`;
       }
       return '';
     },
@@ -267,40 +454,25 @@ function dashboard() {
       return 'sensor';
     },
 
-    /** Is this device in the state worth noticing? Lamps and plugs: on. A
-     *  contact sensor reports true for *closed*, so open is the active one. */
+    /** Is this device in the state its icon animates for? Lamps and plugs: on.
+     *  A contact sensor reports true for *closed*, so open is the active one. */
     iconActive(device) {
       const kind = this.iconKind(device);
       if (kind === 'contact') return this.shown(device.id, 'contact') === false;
       if (kind === 'occupancy') return this.shown(device.id, 'occupancy') === true;
-      if (device.capabilities.includes('switch')) {
-        return this.shown(device.id, 'switch') === true;
-      }
+      if (this.isSwitchable(device)) return this.isOn(device);
       return false;
     },
 
-    /* The icon's colour and how hard it glows. A lamp wears the light it is
-     * actually making -- same Kelvin ramp as the card tint and the slider -- so
-     * a warm lamp at 10% looks like a warm lamp at 10%. */
-    iconStyle(device) {
-      if (!this.iconActive(device)) return '';
-      const kind = this.iconKind(device);
-      if (kind === 'light') {
-        const level = this.shown(device.id, 'brightness');
-        const glow = 0.12 + 0.30 * ((typeof level === 'number' ? level : 100) / 100);
-        return `--icon: ${this.rgb(this.kelvinRgb(this.shown(device.id, 'color_temp')))};`
-             + ` --glow: ${glow.toFixed(2)}`;
-      }
-      if (kind === 'contact') return '--icon: var(--c-warm); --glow: .18';
-      if (kind === 'occupancy') return '--icon: var(--c-state); --glow: .2';
-      return '--icon: var(--on); --glow: .18';
-    },
-
-    statusLabel(id, cap) {
-      if (this.isPending(id, cap)) return 'กำลังสั่ง…';
-      const v = this.value(id, cap);
-      if (v === null) return 'ไม่ทราบสถานะ';
-      return v ? 'เปิดอยู่' : 'ปิดอยู่';
+    /** The line under a switchable device's name. */
+    stateText(device) {
+      if (!device.online) return 'ออฟไลน์';
+      if (this.isPending(device.id, 'switch')) return 'กำลังสั่ง…';
+      const v = this.shown(device.id, 'switch');
+      if (v === null || v === undefined) return 'ไม่ทราบสถานะ';
+      if (!v) return 'ปิดอยู่';
+      const level = this.shown(device.id, 'brightness');
+      return typeof level === 'number' ? `เปิด · ${level}%` : 'เปิดอยู่';
     },
 
     // ------------------------------------------------------------ layout
@@ -310,9 +482,17 @@ function dashboard() {
       return hero.length ? hero : device.capabilities.filter(c => this.STATE_READ.includes(c));
     },
 
+    /** A lamp's sliders only mean something while it is on. */
+    sliderCaps(device) {
+      if (!device.online) return [];
+      if (this.isSwitchable(device) && !this.isOn(device)) return [];
+      return device.writable.filter(c => c !== 'switch');
+    },
+
     /** Small print under a card: the readings that did not earn large type,
      *  plus a staleness warning when the device has gone quiet. */
     footnote(device) {
+      if (!device.online) return [{ key: '_offline', text: 'ออฟไลน์ — ไม่ตอบสนอง', color: 'var(--danger)' }];
       const hero = this.heroCaps(device);
       const notes = [];
 
@@ -320,10 +500,11 @@ function dashboard() {
         if (hero.includes(cap) || !this.READ.includes(cap)) continue;
         const v = this.value(device.id, cap);
         if (v === null) continue;
+        const low = cap === 'battery' && typeof v === 'number' && v <= this.LOW_BATTERY;
         const text = cap === 'battery'
-          ? `แบต ${v}%`
+          ? (low ? `แบตใกล้หมด ${v}%` : `แบต ${v}%`)
           : `${this.LABEL[cap]} ${this.format(device.id, cap)}`;
-        notes.push({ key: cap, text, color: this.readingColor(device.id, cap) });
+        notes.push({ key: cap, text, color: low ? 'var(--warn)' : 'var(--faint)' });
       }
 
       const stale = this.staleness(device);
@@ -333,7 +514,7 @@ function dashboard() {
 
     /** Staleness only means something for devices that are supposed to report
      *  on their own. A lamp is silent between commands by design -- for those,
-     *  `online` (Matter Reachable) is the signal, and it has its own dot. */
+     *  `online` (Matter Reachable) is the signal. */
     staleness(device) {
       this._tick; // reactive dependency so this re-renders on the interval
       const sensing = device.capabilities.filter(c => this.READ.includes(c));
@@ -356,6 +537,17 @@ function dashboard() {
     toggle(device) {
       this.send(device.id, 'switch', !this.shown(device.id, 'switch'));
     },
+
+    /** Switch off every device in `list` that is on, one at a time. */
+    async turnOff(list) {
+      for (const d of list.filter(x => this.isOn(x))) {
+        this.send(d.id, 'switch', false);
+        await new Promise(r => setTimeout(r, this.BULK_GAP_MS));
+      }
+    },
+
+    allOff() { this.turnOff(this.switchable); },
+    roomOff(room) { this.turnOff(this.switchable.filter(d => d.room === room)); },
 
     /** Sliders fire on every pixel of drag; throttle so we do not flood the
      *  Zigbee mesh, which will drop commands (or the device) if hammered. */
@@ -504,10 +696,13 @@ function dashboard() {
     },
 
     async refresh() {
+      this.refreshing = true;
       try {
         await apiFetch('/api/devices/refresh', { method: 'POST' });
       } catch (err) {
         this.toast('error', 'สแกนไม่สำเร็จ', err.message);
+      } finally {
+        this.refreshing = false;
       }
     },
 
@@ -518,13 +713,15 @@ function dashboard() {
       this.chart.device = device;
       this.chart.capability = preferred.find(c => device.capabilities.includes(c))
         || device.capabilities[0];
+      this.chart.data = null;
+      this.chart.geo = null;
       this.chart.open = true;
       this.loadChart();
     },
 
     closeChart() {
       this.chart.open = false;
-      if (this._chartjs) { this._chartjs.destroy(); this._chartjs = null; }
+      this.chart.hover = null;
     },
 
     pickCapability(cap) { this.chart.capability = cap; this.loadChart(); },
@@ -536,69 +733,129 @@ function dashboard() {
       const seq = ++this._reqSeq;
       this.chart.loading = true;
       this.chart.error = null;
+      this.chart.hover = null;
       try {
         const body = await apiFetch(`/api/devices/${encodeURIComponent(device.id)}/history`
           + `?capability=${encodeURIComponent(capability)}&hours=${hours}`);
         if (seq !== this._reqSeq) return;   // a newer request already won
         this.chart.data = body;
-        this.draw();
+        // The box only has a width once the dialog is on screen.
+        this.$nextTick(() => this.draw());
       } catch (err) {
-        if (seq === this._reqSeq) { this.chart.error = err.message; this.chart.data = null; }
+        if (seq === this._reqSeq) { this.chart.error = err.message; this.chart.data = null; this.chart.geo = null; }
       } finally {
         if (seq === this._reqSeq) this.chart.loading = false;
       }
     },
 
+    /* The chart is plain SVG worked out here: a line, a band where the value
+     * swung, a grid. It replaced Chart.js, 200 KB of script that every phone
+     * had to download from the Pi and parse before the first card drew.
+     *
+     * Everything is computed into `chart.geo` and the template only binds it
+     * (Alpine's x-for does not work inside <svg>, so the grid is one path and
+     * the axis labels are HTML laid over it). */
     draw() {
       const data = this.chart.data;
-      if (!data) return;
-      const rgb = this.COLOR[data.capability] || '90 168 124';
-      const grid = 'rgba(255,255,255,.05)';
-      const tick = 'rgb(92 92 102)';
-      const labels = data.points.map(p => this.stamp(p.t, data.hours));
-      const common = { pointRadius: 0, borderWidth: 0, tension: data.boolean ? 0 : 0.35 };
+      const box = this.$refs.plot;
+      if (!data || !box) { this.chart.geo = null; return; }
+      // Not laid out yet (the dialog is still opening): the observer in
+      // init() calls again once the box has a size.
+      if (!box.clientWidth) return;
 
-      const config = {
-        type: 'line',
-        data: {
-          labels,
-          datasets: [
-            { ...common, label: 'max', data: data.points.map(p => p.hi), fill: 1,
-              backgroundColor: `rgba(${rgb} / 0.13)` },
-            { ...common, label: 'min', data: data.points.map(p => p.lo), fill: false },
-            { ...common, label: this.LABEL[data.capability] || data.capability,
-              data: data.points.map(p => p.v), borderColor: `rgb(${rgb})`, borderWidth: 1.75,
-              stepped: data.boolean ? 'before' : false },
-          ],
-        },
-        options: {
-          responsive: true, maintainAspectRatio: false, animation: false,
-          interaction: { mode: 'index', intersect: false },
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              backgroundColor: '#1a1a1d',
-              borderColor: 'rgba(255,255,255,.08)', borderWidth: 1,
-              titleColor: tick, bodyColor: '#e9e9ec',
-              padding: 10, displayColors: false,
-              filter: (item) => item.datasetIndex === 2,
-              callbacks: {
-                label: (item) => ` ${item.formattedValue} ${this.CHART_UNIT[data.capability] || ''}`,
-              },
-            },
-          },
-          scales: {
-            x: { border: { display: false }, grid: { display: false },
-                 ticks: { color: tick, font: { size: 11 }, maxTicksLimit: 7, autoSkip: true } },
-            y: { border: { display: false }, grid: { color: grid },
-                 ticks: { color: tick, font: { size: 11 }, maxTicksLimit: 5, padding: 8 },
-                 ...(data.boolean ? { min: 0, max: 100 } : {}) },
-          },
-        },
+      const W = Math.max(240, box.clientWidth);
+      const H = box.clientHeight;
+      const L = 44, R = W - 8, T = 10, B = H - 28;
+      const end = Date.now() / 1000, start = end - data.hours * 3600;
+      const x = (t) => L + ((t - start) / (end - start)) * (R - L);
+
+      const pts = data.points;
+      const all = pts.flatMap(p => [p.v, p.lo, p.hi]).filter(v => v !== null && v !== undefined);
+      let lo, hi;
+      if (data.boolean) { lo = 0; hi = 100; }
+      else if (all.length) {
+        lo = Math.min(...all); hi = Math.max(...all);
+        const span = hi - lo || Math.abs(hi) * 0.1 || 1;
+        lo -= span * 0.12; hi += span * 0.12;
+      } else { lo = 0; hi = 1; }
+      const y = (v) => B - ((v - lo) / (hi - lo)) * (B - T);
+      const f = (n) => n.toFixed(1);
+
+      // Line: broken where a bucket is empty, stepped for on/off values.
+      const plotted = [];
+      let line = '', prev = null;
+      for (const p of pts) {
+        if (p.v === null || p.v === undefined) { prev = null; continue; }
+        const px = x(p.t), py = y(p.v);
+        if (!prev) line += `M${f(px)} ${f(py)} `;
+        else if (data.boolean) line += `L${f(prev.x)} ${f(py)} L${f(px)} ${f(py)} `;
+        else line += `L${f(px)} ${f(py)} `;
+        prev = { x: px, y: py };
+        plotted.push({ x: px, y: py, v: p.v, t: p.t });
+      }
+
+      // Band: only runs of buckets whose spread beats the threshold, widened
+      // by a bucket each side so it grows out of the line and settles back.
+      let band = '';
+      if (!data.boolean) {
+        const limit = this.SWING[data.capability] ?? (hi - lo) * 0.15;
+        const wide = (p) => p && p.lo !== null && p.hi !== null && p.hi - p.lo > limit;
+        const usable = (p) => p && p.lo !== null && p.hi !== null;
+        const runs = [];
+        for (let i = 0; i < pts.length; i++) {
+          if (!wide(pts[i])) continue;
+          let j = i;
+          while (j + 1 < pts.length && wide(pts[j + 1])) j++;
+          const a = usable(pts[i - 1]) ? i - 1 : i;
+          const b = usable(pts[j + 1]) ? j + 1 : j;
+          if (runs.length && a <= runs[runs.length - 1][1]) runs[runs.length - 1][1] = b;
+          else runs.push([a, b]);
+          i = j;
+        }
+        for (const [a, b] of runs) {
+          for (let k = a; k <= b; k++) band += `${k === a ? 'M' : 'L'}${f(x(pts[k].t))} ${f(y(pts[k].hi))} `;
+          for (let k = b; k >= a; k--) band += `L${f(x(pts[k].t))} ${f(y(pts[k].lo))} `;
+          band += 'Z ';
+        }
+      }
+
+      const unit = this.CHART_UNIT[data.capability] || '';
+      const ticks = data.boolean ? [100, 50, 0] : [0, 1, 2, 3].map(k => hi - ((hi - lo) * k) / 3);
+      const digits = data.boolean || hi - lo >= 10 ? 0 : 1;
+      const grid = ticks.map(v => `M${L} ${f(y(v))} H${R}`).join(' ');
+      const yLabels = ticks.map(v => ({ key: v, top: y(v), text: v.toFixed(digits) + (data.boolean ? '%' : '') }));
+      const xLabels = [0, 0.25, 0.5, 0.75, 1].map(frac => ({
+        key: frac,
+        left: L + frac * (R - L),
+        align: frac === 0 ? 'start' : frac === 1 ? 'end' : 'center',
+        text: frac === 1 ? 'ตอนนี้' : this.stamp(start + frac * (end - start), data.hours),
+      }));
+
+      this.chart.geo = {
+        w: W, h: H, L, R, T, B, grid, line, band: band.trim(), yLabels, xLabels, unit,
+        pts: plotted, last: plotted[plotted.length - 1] || null,
+        stroke: `rgb(${this.COLOR[data.capability] || '90 168 124'})`,
+        fill: `rgb(${this.COLOR[data.capability] || '90 168 124'} / .22)`,
       };
+    },
 
-      if (this._chartjs) { this._chartjs.destroy(); }
-      this._chartjs = new Chart(this.$refs.canvas, config);
+    /** Nearest plotted point to the pointer, for the readout. */
+    hoverChart(event) {
+      const g = this.chart.geo;
+      if (!g || !g.pts.length) return;
+      const rect = event.currentTarget.getBoundingClientRect();
+      const px = (event.clientX - rect.left) * (g.w / rect.width);
+      let best = g.pts[0];
+      for (const p of g.pts) if (Math.abs(p.x - px) < Math.abs(best.x - px)) best = p;
+      const when = new Date(best.t * 1000).toLocaleString('th-TH', {
+        day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+      });
+      this.chart.hover = {
+        x: best.x, y: best.y, when,
+        text: `${Math.round(best.v * 10) / 10}${g.unit}`,
+        // Keep the readout inside the box at either edge.
+        left: Math.min(Math.max(best.x, 64), g.w - 64),
+      };
     },
 
     stamp(epoch, hours) {
@@ -623,9 +880,9 @@ function dashboard() {
           : 'var(--text)',
       });
       return [
-        item('ต่ำสุด', Math.min(...data.points.map(p => p.lo ?? p.v))),
+        item('ต่ำสุด', Math.min(...data.points.map(p => p.lo ?? p.v).filter(v => v !== null))),
         item('เฉลี่ย', values.reduce((a, b) => a + b, 0) / values.length),
-        item('สูงสุด', Math.max(...data.points.map(p => p.hi ?? p.v))),
+        item('สูงสุด', Math.max(...data.points.map(p => p.hi ?? p.v).filter(v => v !== null))),
       ];
     },
 
