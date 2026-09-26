@@ -3,7 +3,9 @@
 {% block head_scripts %}<script src="{{ static_url('dashboard.js') }}"></script>{% endblock %}
 
 {% block content %}
-<div x-data="dashboard()" x-init="init()" x-cloak class="min-h-screen">
+<!-- No x-init: Alpine calls the component's init() by itself, and calling it
+     again here opened a second WebSocket -- every message sent twice. -->
+<div x-data="dashboard()" x-cloak class="min-h-screen">
 
   <!-- ── header ─────────────────────────────────────────────────────────── -->
   <header class="sticky top-0 z-20 border-b border-[var(--line)] bg-[var(--bg)]/85 backdrop-blur-xl">
