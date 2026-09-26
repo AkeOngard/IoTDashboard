@@ -7,9 +7,13 @@
 <div class="flex min-h-screen items-center justify-center px-6">
   <div class="w-full max-w-[340px]">
 
-    <div class="mb-8 text-center">
-      <h1 class="text-[15px] font-semibold tracking-tight">IoT Gateway</h1>
-      <p class="mt-1 text-[13px] text-[var(--muted)]">
+    <div class="mb-8 flex flex-col items-center text-center">
+      <svg class="mb-3" width="36" height="36" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M3.5 10.5 12 3.8l8.5 6.7V20H3.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        <circle cx="12" cy="14" r="2.2" fill="var(--on)"/>
+      </svg>
+      <h1 class="text-[20px] font-semibold tracking-tight">IoT Gateway</h1>
+      <p class="mt-1 text-[14px] text-[var(--muted)]">
         {% if setup_needed %}ยังไม่ได้ตั้งรหัสผ่าน{% else %}ใส่รหัสผ่านเพื่อเข้าใช้งาน{% endif %}
       </p>
     </div>
@@ -18,7 +22,7 @@
       <!-- Setting the first password is a shell job on purpose: a dashboard
            that lets whoever arrives first choose the password is not much of a
            lock. Same reasoning as commissioning. -->
-      <div class="rounded-2xl bg-[var(--surface)] p-5 text-[13px] leading-relaxed ring-1 ring-white/[.05]">
+      <div class="rounded-[20px] border border-[var(--line)] bg-[var(--surface)] p-5 text-[14px] leading-relaxed">
         <p class="text-[var(--muted)]">สั่งคำสั่งนี้บนเครื่องที่รัน dashboard แล้วรีเฟรชหน้านี้:</p>
         <pre class="mt-3 overflow-x-auto rounded-lg bg-[var(--bg)] p-3 text-[12px] text-[var(--text)]"><code>docker exec -it iot-app \
   python scripts/set_password.py</code></pre>
@@ -31,21 +35,21 @@
         <!-- autocomplete lets a password manager fill this; there is one
              account, so "current-password" is the honest hint. -->
         <input x-model="password" type="password" autocomplete="current-password"
-               autofocus placeholder="รหัสผ่าน" :disabled="busy"
-               class="w-full rounded-xl bg-[var(--surface)] px-4 py-3 text-[14px] outline-none ring-1 ring-[var(--line)] transition focus:ring-white/25 disabled:opacity-50">
+               autofocus placeholder="รหัสผ่าน" aria-label="รหัสผ่าน" :disabled="busy"
+               class="h-12 w-full rounded-xl bg-[var(--surface)] px-4 text-[16px] outline-none ring-1 ring-[var(--line-strong)] transition focus:ring-white/40 disabled:opacity-50">
 
         <button type="submit" :disabled="busy || !password"
-                class="w-full rounded-xl bg-[var(--on)] px-4 py-3 text-[14px] font-medium text-black transition-opacity hover:opacity-90 disabled:opacity-40">
+                class="h-12 w-full rounded-xl bg-[var(--on)] px-4 text-[16px] font-medium text-black transition-opacity hover:opacity-90 disabled:opacity-40">
           <span x-text="busy ? 'กำลังตรวจสอบ…' : 'เข้าสู่ระบบ'"></span>
         </button>
 
         <template x-if="error">
-          <p class="pt-1 text-center text-[13px] text-[var(--danger)]" x-text="error"></p>
+          <p class="pt-1 text-center text-[14px] text-[var(--danger-text)]" role="alert" x-text="error"></p>
         </template>
       </form>
     {% endif %}
 
-    <p class="mt-8 text-center text-[12px] text-[var(--faint)]">
+    <p class="mt-8 text-center text-[13px] text-[var(--faint)]">
       เข้าถึงได้เฉพาะเครื่องในเครือข่ายที่อนุญาตไว้
     </p>
   </div>
