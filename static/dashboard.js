@@ -74,6 +74,10 @@ function dashboard() {
     // lamps does not hit the Zigbee mesh in one burst.
     BULK_GAP_MS: 150,
 
+    // What the adapters call a device with no room. Matter has no rooms at
+    // all, so on a Matter install every device starts here.
+    UNASSIGNED: 'Unassigned',
+
     devices: [], states: {}, pending: {}, toasts: [],
     // Which room the chips show; 'all' for every room.
     room: 'all',
@@ -164,8 +168,16 @@ function dashboard() {
     nameOf(id) { return (this.devices.find(d => d.id === id) || {}).name || id; },
     byRoom(room) { return this.devices.filter(d => d.room === room); },
 
+    /** Rooms in name order, with the no-room bucket last. */
     get rooms() {
-      return [...new Set(this.devices.map(d => d.room))].sort();
+      const names = [...new Set(this.devices.map(d => d.room))].sort();
+      return names.filter(r => r !== this.UNASSIGNED)
+        .concat(names.includes(this.UNASSIGNED) ? [this.UNASSIGNED] : []);
+    },
+
+    /** The placeholder is an English word from the adapter, not a room. */
+    roomLabel(room) {
+      return room === this.UNASSIGNED ? 'ยังไม่ระบุห้อง' : room;
     },
 
     /** The rooms the chips leave on screen. A remembered room that has since
@@ -285,8 +297,8 @@ function dashboard() {
         text: cap === 'temperature' ? avg.toFixed(1) : String(Math.round(avg)),
         color: color(avg),
         many: rows.length > 1,
-        room: rows[0].d.room,
-        topRoom: top.d.room,
+        room: this.roomLabel(rows[0].d.room),
+        topRoom: this.roomLabel(top.d.room),
         topText: cap === 'temperature' ? top.v.toFixed(1) : String(Math.round(top.v)),
         topColor: color(top.v),
       };
@@ -579,7 +591,7 @@ function dashboard() {
       this.editing = device.id;
       this.draft = {
         name: device.name || '',
-        room: device.room === 'Unassigned' ? '' : (device.room || ''),
+        room: device.room === this.UNASSIGNED ? '' : (device.room || ''),
       };
     },
 
