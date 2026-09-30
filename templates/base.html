@@ -3,9 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0b0c0f">
+  <meta name="theme-color" content="#0f0f16">
   <title>{% block title %}IoT Control Gateway{% endblock %}</title>
   <link rel="manifest" href="{{ static_url('manifest.json') }}">
+  <!-- First, before anything paints: dark or light, glass or solid. -->
+  <script src="{{ static_url('theme.js') }}"></script>
 
   <!-- One family: IBM Plex Sans Thai carries its own Latin, so a second
        typeface would only be another download. If Google is unreachable the
@@ -26,43 +28,97 @@
   <script defer src="{{ static_url('vendor/alpinejs-3.14.1.min.js') }}"></script>
 
   <style>
-    /* One palette, one place. The UI is deliberately committed to a dark
-       surface -- it lives on a wall panel and a phone at night -- but every
-       colour is a token, so a light theme is a block of overrides, not a
-       rewrite of the markup. Surfaces are opaque: a translucent card over a
-       blurred page makes a weak phone GPU composite every layer on scroll. */
-    :root {
+    /* Nocturne: one palette in two themes (dark, light) and two looks
+       (solid, glass). Every colour is a token, so the markup never names a
+       theme; static/theme.js sets data-theme and data-look on <html>. */
+    :root, :root[data-theme="dark"] {
       color-scheme: dark;
-      --bg:            #0b0c0f;
-      --panel:         #111317;   /* dialogs */
-      --surface:       #15171b;   /* cards */
-      --surface-2:     #1b1d22;   /* segmented controls, toasts */
-      --surface-hover: #1f2228;
-      --line:          #23262c;
-      --line-strong:   #2e3239;
-      --text:          #ecebe6;
-      --muted:         #a3a5ab;   /* sentences you read */
-      --faint:         #858891;   /* labels you glance past; still 4.5:1 on cards */
-      --on:            #4bbd85;   /* device is on / everything healthy */
-      --on-text:       #8fdcb3;
-      --warn:          #e6a94e;   /* hub reconnecting, window open, battery low */
-      --warn-text:     #f0c27a;
-      --danger:        #ec7a66;   /* command failed, server unreachable */
-      --danger-text:   #f19a8a;
-      --track:         #2b2e35;
+      --bg:          #0f0f16;
+      --pane:        #181823;   /* sidebar, panels, dialogs */
+      --tile:        #1f1f2c;   /* device and group tiles */
+      --tile-hover:  #262635;
+      --line:        #2a2a3a;
+      --line-strong: #3a3a4e;
+      --text:        #ecebf3;
+      --muted:       #b0aec2;   /* sentences you read */
+      --faint:       #8e8ca2;   /* labels you glance past; 4.5:1 on a pane */
+      --accent:      #8b7cf6;
+      --accent-ink:  #ffffff;   /* text on an accent fill */
+      --accent-text: #bbb1ff;
+      --accent-soft: rgb(139 124 246 / .14);
+      --accent-line: rgb(139 124 246 / .42);
+      --track:       #3a3a50;
+      --ok:          #56c28e;
+      --ok-text:     #8fdcb3;
+      --warn:        #e6a94e;
+      --warn-text:   #f0c27a;
+      --danger:      #ec7a66;
+      --danger-text: #f19a8a;
+      --backdrop:    #0f0f16;
+      --shadow:      0 10px 30px rgb(0 0 0 / .35);
+      --c-state:     #b9a0f7;
+    }
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg:          #efeef6;
+      --pane:        #ffffff;
+      --tile:        #f6f5fb;
+      --tile-hover:  #eeecf8;
+      --line:        #e3e1ee;
+      --line-strong: #d0cde2;
+      --text:        #1d1b29;
+      --muted:       #4f4c63;
+      --faint:       #67647d;
+      --accent:      #6c5ce0;
+      --accent-ink:  #ffffff;
+      --accent-text: #5343c4;
+      --accent-soft: rgb(108 92 224 / .10);
+      --accent-line: rgb(108 92 224 / .35);
+      --track:       #d4d1e5;
+      --ok:          #2f9e6a;
+      --ok-text:     #1d7a4d;
+      --warn:        #c7851c;
+      --warn-text:   #8f5b08;
+      --danger:      #d4533e;
+      --danger-text: #b23e2b;
+      --backdrop:    #efeef6;
+      --shadow:      0 10px 30px rgb(60 50 120 / .12);
+      --c-state:     #7a5fd6;
+    }
 
-      /* Reading colours. These are not decoration: a value carries its own
-         colour, so "too hot" and "battery nearly flat" read before the number
-         does. static/dashboard.js interpolates between them. */
-      --c-cold:  #62a6e8;
-      --c-fresh: #45c4a6;
-      --c-good:  #7cc766;
-      --c-warm:  #e6b44f;
-      --c-hot:   #e56f5c;
-      --c-lux:   #edc95c;
-      --c-humid: #4fbde8;
-      --c-damp:  #8b8ff0;
-      --c-state: #b9a0f7;
+    /* Glass: panels frost whatever is behind them. Only the few large panes
+       blur -- sidebar, panels, dialogs, the tab bar. The many small tiles are
+       plain translucent fills, because a blur per tile is what makes an old
+       phone stutter on scroll. The light behind the glass is one fixed layer
+       painted once, not a background the page re-draws while scrolling.
+       Text tokens go up a step: translucent panes sit on a brighter ground. */
+    :root[data-look="glass"][data-theme="dark"] {
+      --pane:        rgb(30 28 48 / .55);
+      --tile:        rgb(255 255 255 / .055);
+      --tile-hover:  rgb(255 255 255 / .09);
+      --line:        rgb(255 255 255 / .10);
+      --line-strong: rgb(255 255 255 / .18);
+      --muted:       #c4c2d4;
+      --faint:       #a7a5bb;
+      --backdrop:
+        radial-gradient(55% 45% at 12% 8%, rgb(124 92 255 / .42), transparent 70%),
+        radial-gradient(45% 40% at 92% 18%, rgb(32 178 170 / .30), transparent 70%),
+        radial-gradient(60% 55% at 55% 105%, rgb(170 70 200 / .24), transparent 70%),
+        #0c0b14;
+    }
+    :root[data-look="glass"][data-theme="light"] {
+      --pane:        rgb(255 255 255 / .58);
+      --tile:        rgb(255 255 255 / .55);
+      --tile-hover:  rgb(255 255 255 / .75);
+      --line:        rgb(108 92 190 / .16);
+      --line-strong: rgb(108 92 190 / .28);
+      --muted:       #45425a;
+      --faint:       #5b5872;
+      --backdrop:
+        radial-gradient(55% 45% at 10% 5%, rgb(155 130 255 / .45), transparent 70%),
+        radial-gradient(45% 40% at 95% 15%, rgb(80 200 200 / .30), transparent 70%),
+        radial-gradient(60% 55% at 50% 105%, rgb(230 150 230 / .30), transparent 70%),
+        #eceaf6;
     }
 
     html { -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
@@ -72,30 +128,77 @@
       color: var(--text);
       -webkit-font-smoothing: antialiased;
     }
+    body::before {
+      content: ''; position: fixed; inset: 0; z-index: -1;
+      background: var(--backdrop);
+    }
     [x-cloak] { display: none !important; }
-    ::selection { background: rgba(255, 255, 255, .16); }
+    ::selection { background: var(--accent-soft); }
     button { cursor: pointer; }
     button:disabled { cursor: default; }
-    :focus-visible { outline: 2px solid rgba(255, 255, 255, .35); outline-offset: 2px; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
     ::-webkit-scrollbar { width: 10px; height: 10px; }
-    ::-webkit-scrollbar-thumb {
-      background: rgba(255, 255, 255, .10);
-      border: 3px solid var(--bg);
-      border-radius: 999px;
-    }
-    ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, .18); }
+    ::-webkit-scrollbar-thumb { background: var(--line-strong); border: 3px solid transparent; background-clip: padding-box; border-radius: 999px; }
     ::-webkit-scrollbar-track { background: transparent; }
     .no-scrollbar { scrollbar-width: none; }
     .no-scrollbar::-webkit-scrollbar { display: none; }
 
-    /* Sliders paint what they control: the brightness track fades up to the
-       lamp's current colour, and the colour-temperature track is an actual
-       Kelvin gradient -- so the control shows the outcome before you commit to
-       it. `--track-img` is set per input from dashboard.js. The thumb is big
-       enough to land a thumb on. */
+    /* ── surfaces ─────────────────────────────────────────────────────── */
+    .pane {
+      background: var(--pane);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+    }
+    :root[data-look="glass"] .pane {
+      -webkit-backdrop-filter: blur(22px) saturate(1.5);
+      backdrop-filter: blur(22px) saturate(1.5);
+      box-shadow: inset 0 1px 0 rgb(255 255 255 / .07), var(--shadow);
+    }
+    .tile {
+      background: var(--tile);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      transition: background-color .2s ease, border-color .2s ease;
+    }
+    a.tile:hover, .tile-link:hover { background: var(--tile-hover); }
+    .tile.is-on { background: var(--accent-soft); border-color: var(--accent-line); }
+
+    /* Segmented control: a row of buttons, the pressed one filled. */
+    .seg { display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--tile); border: 1px solid var(--line); }
+    .seg > button { height: 36px; padding: 0 12px; border-radius: 10px; font-size: 14px; color: var(--muted); white-space: nowrap; transition: background-color .15s ease, color .15s ease; }
+    .seg > button:hover { color: var(--text); }
+    .seg > button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+
+    .pill { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 999px; font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+    .pill-ok     { background: var(--accent-soft); color: var(--accent-text); }
+    .pill-warn   { background: rgb(230 169 78 / .16); color: var(--warn-text); }
+    .pill-muted  { background: var(--tile-hover); color: var(--faint); }
+
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; padding: 0 16px; border-radius: 12px; font-size: 15px; white-space: nowrap; transition: background-color .15s ease, opacity .15s ease; }
+    .btn-accent { background: var(--accent); color: var(--accent-ink); font-weight: 500; }
+    .btn-accent:hover { opacity: .9; }
+    .btn-ghost { border: 1px solid var(--line-strong); background: var(--tile); }
+    .btn-ghost:hover { background: var(--tile-hover); }
+    .btn:disabled { opacity: .45; }
+
+    .field { height: 44px; width: 100%; padding: 0 12px; border-radius: 12px; font-size: 16px; color: var(--text); background: var(--tile); border: 1px solid var(--line-strong); outline: none; }
+    .field:focus { border-color: var(--accent); }
+
+    /* The toggle: a real button, its knob springing across. */
+    .toggle { position: relative; flex: none; width: 46px; height: 28px; border-radius: 999px; background: var(--track); transition: background-color .2s ease; }
+    .toggle::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / .3); transition: transform .22s cubic-bezier(.3, .9, .3, 1.2); }
+    .toggle[aria-pressed="true"] { background: var(--accent); }
+    .toggle[aria-pressed="true"]::after { transform: translateX(18px); }
+    .toggle:disabled { opacity: .45; }
+    /* A bigger hit area than the drawing, for thumbs. */
+    .toggle::before { content: ''; position: absolute; inset: -9px -4px; }
+
+    /* Sliders paint what they control: brightness fades up to the accent,
+       colour temperature is an actual Kelvin gradient. `--track-img` is set
+       per input from dashboard.js. */
     .slider {
-      -webkit-appearance: none; appearance: none; display: block;
+      -webkit-appearance: none; appearance: none; display: block; width: 100%;
       height: 6px; margin: 11px 0 5px; border-radius: 999px; cursor: pointer;
       background: var(--track-img, var(--track));
     }
@@ -104,18 +207,21 @@
     .slider::-webkit-slider-thumb {
       -webkit-appearance: none; appearance: none;
       margin-top: -7px; height: 20px; width: 20px; border-radius: 999px;
-      background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .55);
+      background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / .45);
       transition: transform .12s ease;
     }
-    .slider::-moz-range-thumb {
-      height: 20px; width: 20px; border: 0; border-radius: 999px; background: #fff;
-    }
+    .slider::-moz-range-thumb { height: 20px; width: 20px; border: 0; border-radius: 999px; background: #fff; }
     .slider:active::-webkit-slider-thumb { transform: scale(1.12); }
     .slider:focus { outline: none; }
-    .slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px rgba(255, 255, 255, .25); }
+    .slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px var(--accent-soft); }
 
-    /* The toggle's knob springs across rather than sliding flat. */
-    .knob { transition: transform .22s cubic-bezier(.3, .9, .3, 1.2); }
+    /* Sidebar and tab-bar links. */
+    .nav-link { display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 12px; border-radius: 12px; font-size: 15px; color: var(--muted); transition: background-color .15s ease, color .15s ease; }
+    .nav-link:hover { background: var(--tile-hover); color: var(--text); }
+    .nav-link[aria-current="page"] { background: var(--accent-soft); color: var(--text); }
+    .nav-link[aria-current="page"] svg { color: var(--accent-text); }
+    .tab-link { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; height: 56px; border-radius: 14px; font-size: 11.5px; color: var(--faint); }
+    .tab-link[aria-current="page"] { color: var(--accent-text); }
 
     /* A command in flight: the control breathes until the device answers. */
     @keyframes pulse-soft { 0%, 100% { opacity: 1 } 50% { opacity: .45 } }
@@ -134,8 +240,9 @@
       color: var(--faint);
       transition: color .35s ease;
     }
-    .dev-icon svg { width: 100%; height: 100%; display: block; }
-    .dev-icon.is-active { color: var(--icon, var(--on)); }
+    .dev-icon svg, .ic svg { width: 100%; height: 100%; display: block; }
+    .ic { display: inline-block; flex: none; }
+    .dev-icon.is-active { color: var(--accent-text); }
 
     /* The filled twin of the outline, faded in behind it. */
     .dev-icon .glow { opacity: 0; transition: opacity .4s ease; }
