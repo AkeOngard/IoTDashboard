@@ -90,7 +90,8 @@ function dashboard() {
     pins: [],
     // Which climate sensor the overview chart follows.
     overviewSensor: null,
-    theme: 'dark', look: 'glass', canBlur: true,
+    // Appearance, per browser: theme and how see-through the panels are (0-100).
+    theme: 'dark', glass: 100, canBlur: true,
     // The device being renamed, and the draft being typed into it.
     editing: null, draft: { name: '', room: '' }, saving: false, refreshing: false,
     socket: false, adapterConnected: false, adapterName: '—', historyEnabled: false,
@@ -105,7 +106,7 @@ function dashboard() {
     init() {
       const root = document.documentElement;
       this.theme = root.getAttribute('data-theme') || 'dark';
-      this.look = root.getAttribute('data-look') || 'solid';
+      this.glass = parseInt(root.getAttribute('data-glass'), 10) || 0;
       this.canBlur = root.getAttribute('data-can-blur') !== 'no';
       this.syncThemeColor();
       try { this.pins = JSON.parse(localStorage.getItem('iot.pins') || '[]'); } catch (e) { this.pins = []; }
@@ -213,11 +214,26 @@ function dashboard() {
       if (this.chart.data) this.$nextTick(() => this.draw());
     },
 
-    setLook(look) {
-      if (look === 'glass' && !this.canBlur) return;
-      this.look = look;
-      document.documentElement.setAttribute('data-look', look);
-      try { localStorage.setItem('iot.look', look); } catch (e) { /* private mode */ }
+    /** 0 is solid, 100 full glass, anything between a mix. Dragging only
+     *  changes one CSS variable, so it follows the thumb without re-laying
+     *  out the page; at 0 the blur switches off altogether. */
+    setGlass(raw) {
+      const level = this.canBlur ? Math.max(0, Math.min(100, Math.round(Number(raw)))) : 0;
+      this.glass = level;
+      const root = document.documentElement;
+      root.style.setProperty('--glass', String(level / 100));
+      root.setAttribute('data-look', level > 0 ? 'glass' : 'solid');
+      root.setAttribute('data-glass', String(level));
+      try {
+        localStorage.setItem('iot.glass', String(level));
+        localStorage.removeItem('iot.look');
+      } catch (e) { /* private mode */ }
+    },
+
+    get glassLabel() {
+      if (this.glass === 0) return 'ทึบ';
+      if (this.glass === 100) return 'ใสเต็มที่';
+      return this.glass + '%';
     },
 
     /** The phone's own status bar follows the page. */

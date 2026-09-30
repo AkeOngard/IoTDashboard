@@ -28,17 +28,24 @@
   <script defer src="{{ static_url('vendor/alpinejs-3.14.1.min.js') }}"></script>
 
   <style>
-    /* Nocturne: one palette in two themes (dark, light) and two looks
-       (solid, glass). Every colour is a token, so the markup never names a
-       theme; static/theme.js sets data-theme and data-look on <html>. */
+    /* Nocturne: one palette in two themes (dark, light), and a glass level
+       from solid to fully see-through. Every colour is a token, so the markup
+       never names a theme; static/theme.js sets data-theme, data-look and
+       --glass (0 = solid, 1 = full glass) on <html>.
+
+       Panes and the glow behind them are the only things --glass moves.
+       Tiles and lines are light translucent fills that read the same on a
+       solid pane or a frosted one, so they need no second set of values. */
     :root, :root[data-theme="dark"] {
       color-scheme: dark;
+      --glass:       0;
       --bg:          #0f0f16;
-      --pane:        #181823;   /* sidebar, panels, dialogs */
-      --tile:        #1f1f2c;   /* device and group tiles */
-      --tile-hover:  #262635;
-      --line:        #2a2a3a;
-      --line-strong: #3a3a4e;
+      --pane:        rgb(24 24 35 / calc(1 - .45 * var(--glass)));   /* sidebar, panels */
+      --pane-dense:  rgb(24 24 35 / calc(1 - .15 * var(--glass)));   /* dialogs, toasts: text over busy ground */
+      --tile:        rgb(255 255 255 / .055);                        /* device and group tiles */
+      --tile-hover:  rgb(255 255 255 / .09);
+      --line:        rgb(255 255 255 / .09);
+      --line-strong: rgb(255 255 255 / .16);
       --text:        #ecebf3;
       --muted:       #b0aec2;   /* sentences you read */
       --faint:       #8e8ca2;   /* labels you glance past; 4.5:1 on a pane */
@@ -54,18 +61,24 @@
       --warn-text:   #f0c27a;
       --danger:      #ec7a66;
       --danger-text: #f19a8a;
-      --backdrop:    #0f0f16;
+      /* The light behind the glass fades in with it. */
+      --backdrop:
+        radial-gradient(55% 45% at 12% 8%, rgb(124 92 255 / calc(.42 * var(--glass))), transparent 70%),
+        radial-gradient(45% 40% at 92% 18%, rgb(32 178 170 / calc(.30 * var(--glass))), transparent 70%),
+        radial-gradient(60% 55% at 55% 105%, rgb(170 70 200 / calc(.24 * var(--glass))), transparent 70%),
+        #0f0f16;
       --shadow:      0 10px 30px rgb(0 0 0 / .35);
       --c-state:     #b9a0f7;
     }
     :root[data-theme="light"] {
       color-scheme: light;
       --bg:          #efeef6;
-      --pane:        #ffffff;
-      --tile:        #f6f5fb;
-      --tile-hover:  #eeecf8;
-      --line:        #e3e1ee;
-      --line-strong: #d0cde2;
+      --pane:        rgb(255 255 255 / calc(1 - .42 * var(--glass)));
+      --pane-dense:  rgb(255 255 255 / calc(1 - .15 * var(--glass)));
+      --tile:        rgb(246 245 251 / calc(1 - .45 * var(--glass)));
+      --tile-hover:  rgb(236 234 248 / calc(1 - .30 * var(--glass)));
+      --line:        rgb(108 92 190 / .15);
+      --line-strong: rgb(108 92 190 / .27);
       --text:        #1d1b29;
       --muted:       #4f4c63;
       --faint:       #67647d;
@@ -81,44 +94,24 @@
       --warn-text:   #8f5b08;
       --danger:      #d4533e;
       --danger-text: #b23e2b;
-      --backdrop:    #efeef6;
+      --backdrop:
+        radial-gradient(55% 45% at 10% 5%, rgb(155 130 255 / calc(.45 * var(--glass))), transparent 70%),
+        radial-gradient(45% 40% at 95% 15%, rgb(80 200 200 / calc(.30 * var(--glass))), transparent 70%),
+        radial-gradient(60% 55% at 50% 105%, rgb(230 150 230 / calc(.30 * var(--glass))), transparent 70%),
+        #efeef6;
       --shadow:      0 10px 30px rgb(60 50 120 / .12);
       --c-state:     #7a5fd6;
     }
 
-    /* Glass: panels frost whatever is behind them. Only the few large panes
-       blur -- sidebar, panels, dialogs, the tab bar. The many small tiles are
-       plain translucent fills, because a blur per tile is what makes an old
-       phone stutter on scroll. The light behind the glass is one fixed layer
-       painted once, not a background the page re-draws while scrolling.
-       Text tokens go up a step: translucent panes sit on a brighter ground. */
+    /* Any glass at all: text tokens go up a step, because translucent panes
+       sit on a brighter ground than solid ones. */
     :root[data-look="glass"][data-theme="dark"] {
-      --pane:        rgb(30 28 48 / .55);
-      --tile:        rgb(255 255 255 / .055);
-      --tile-hover:  rgb(255 255 255 / .09);
-      --line:        rgb(255 255 255 / .10);
-      --line-strong: rgb(255 255 255 / .18);
       --muted:       #c4c2d4;
       --faint:       #a7a5bb;
-      --backdrop:
-        radial-gradient(55% 45% at 12% 8%, rgb(124 92 255 / .42), transparent 70%),
-        radial-gradient(45% 40% at 92% 18%, rgb(32 178 170 / .30), transparent 70%),
-        radial-gradient(60% 55% at 55% 105%, rgb(170 70 200 / .24), transparent 70%),
-        #0c0b14;
     }
     :root[data-look="glass"][data-theme="light"] {
-      --pane:        rgb(255 255 255 / .58);
-      --tile:        rgb(255 255 255 / .55);
-      --tile-hover:  rgb(255 255 255 / .75);
-      --line:        rgb(108 92 190 / .16);
-      --line-strong: rgb(108 92 190 / .28);
       --muted:       #45425a;
       --faint:       #5b5872;
-      --backdrop:
-        radial-gradient(55% 45% at 10% 5%, rgb(155 130 255 / .45), transparent 70%),
-        radial-gradient(45% 40% at 95% 15%, rgb(80 200 200 / .30), transparent 70%),
-        radial-gradient(60% 55% at 50% 105%, rgb(230 150 230 / .30), transparent 70%),
-        #eceaf6;
     }
 
     html { -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
@@ -150,10 +143,21 @@
       border: 1px solid var(--line);
       border-radius: 20px;
     }
+    /* A dialog lies over cards and text, so it stays nearly opaque whatever
+       the glass level: frosted enough to look the part, not so clear that
+       what is behind competes with what is on it. */
+    .pane.dense { background: var(--pane-dense); }
+    /* Glass: panes frost whatever is behind them, harder the higher the
+       level. Only the few large panes blur -- sidebar, panels, dialogs, the
+       tab bar. The many small tiles are plain translucent fills, because a
+       blur per tile is what makes an old phone stutter on scroll, and the
+       light behind is one fixed layer painted once, not a background the
+       page re-draws while scrolling. At level 0 data-look is "solid" and
+       none of this applies, so a solid page pays nothing for it. */
     :root[data-look="glass"] .pane {
-      -webkit-backdrop-filter: blur(22px) saturate(1.5);
-      backdrop-filter: blur(22px) saturate(1.5);
-      box-shadow: inset 0 1px 0 rgb(255 255 255 / .07), var(--shadow);
+      -webkit-backdrop-filter: blur(calc(24px * var(--glass))) saturate(calc(1 + .5 * var(--glass)));
+      backdrop-filter: blur(calc(24px * var(--glass))) saturate(calc(1 + .5 * var(--glass)));
+      box-shadow: inset 0 1px 0 rgb(255 255 255 / calc(.07 * var(--glass))), var(--shadow);
     }
     .tile {
       background: var(--tile);
