@@ -72,6 +72,21 @@ async def send_command(request: Request, device_id: str, body: dict[str, Any] = 
     return await _command(request, device_id, str(capability), body["value"])
 
 
+@router.post("/switch")
+async def switch_devices(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """Switch a set of devices -- a room, the whole house -- in one request.
+
+    The Pi sends the commands one at a time, a short gap apart, rather than
+    the browser firing one request per device.
+    """
+    devices, value = body.get("devices"), body.get("value")
+    if not isinstance(value, bool) or not isinstance(devices, list):
+        raise HTTPException(status_code=422, detail="body needs 'devices' (a list) and 'value' (true or false)")
+    if len(devices) > 200 or not all(isinstance(d, str) for d in devices):
+        raise HTTPException(status_code=422, detail="'devices' must be at most 200 device ids")
+    return {"value": value, "devices": _hub(request).switch_many(devices, value)}
+
+
 @router.patch("/{device_id}/label")
 async def relabel_device(
     request: Request, device_id: str, body: dict[str, Any] = Body(...)

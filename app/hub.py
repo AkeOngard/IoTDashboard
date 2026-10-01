@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from app.adapters.base import DeviceAdapter
+from app.groups import GroupStore
 from app.labels import LabelStore
 from app.models import (
     CONFIRM_TOLERANCE,
@@ -37,6 +38,10 @@ QUEUE_LIMIT = 256
 #: a light going offline is visible about as fast as a human notices.
 RESYNC_DELAY = 0.3
 
+#: Gap between the commands of a group switch. A room full of lamps sent in
+#: one burst is how a Zigbee mesh starts dropping packets.
+BULK_GAP = 0.15
+
 
 class _Pending:
     __slots__ = ("target", "started", "task")
@@ -54,11 +59,15 @@ class Hub:
         command_timeout: float = 5.0,
         recorder: Any | None = None,
         labels: LabelStore | None = None,
+        groups: GroupStore | None = None,
     ) -> None:
         self._adapter = adapter
         self._timeout = command_timeout
         self._recorder = recorder
         self._labels = labels or LabelStore(None)
+        self._groups = groups or GroupStore(None)
+        # Group switches still sending, with the devices each will touch.
+        self._bulk: dict[asyncio.Task, frozenset[str]] = {}
         self._devices: dict[str, Device] = {}
         self._states: dict[tuple[str, Capability], StateEvent] = {}
         self._pending: dict[tuple[str, Capability], _Pending] = {}
@@ -79,11 +88,13 @@ class Hub:
             if pending.task:
                 pending.task.cancel()
         self._pending.clear()
-        if self._resync is not None:
-            self._resync.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._resync
-            self._resync = None
+        for task in [self._resync, *self._bulk]:
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+        self._resync = None
+        self._bulk.clear()
         await self._adapter.stop()
 
     async def refresh(self) -> None:
@@ -138,6 +149,59 @@ class Hub:
         )
         return device
 
+    # ---------------------------------------------------------------- groups
+
+    @property
+    def groups(self) -> GroupStore:
+        return self._groups
+
+    async def groups_changed(self) -> None:
+        """Tell every open dashboard the group list moved."""
+        await self._broadcast({"type": "groups", "groups": self._groups.list()})
+
+    def switch_many(self, device_ids: list[str], on: bool) -> list[str]:
+        """Switch a set of devices on or off, one command at a time.
+
+        Returns at once with the ids that will be sent; the commands go out
+        from a background task, BULK_GAP apart, and each reports through the
+        usual pending -> confirmed | failed messages. One request from the
+        browser instead of one per device, and the run finishes even if the
+        phone that started it is put away. A newer switch cancels an older
+        one still running only where they share devices -- "all on" then "all
+        off" should end off -- and leaves an unrelated group to finish.
+        """
+        targets = []
+        for device_id in dict.fromkeys(device_ids):
+            device = self._devices.get(device_id)
+            if device is None or not device.online or Capability.SWITCH not in device.capabilities:
+                continue
+            state = self._states.get((device_id, Capability.SWITCH))
+            if state is not None and state.value == on and (device_id, Capability.SWITCH) not in self._pending:
+                continue   # already there
+            targets.append(device_id)
+
+        touched = frozenset(device_ids)
+        for task, devices in list(self._bulk.items()):
+            if devices & touched:
+                task.cancel()
+        if targets:
+            task = asyncio.create_task(self._switch_in_turn(targets, on))
+            self._bulk[task] = touched
+            task.add_done_callback(lambda t: self._bulk.pop(t, None))
+        return targets
+
+    async def _switch_in_turn(self, device_ids: list[str], on: bool) -> None:
+        with contextlib.suppress(asyncio.CancelledError):
+            for i, device_id in enumerate(device_ids):
+                if i:
+                    await asyncio.sleep(BULK_GAP)
+                try:
+                    await self.execute(device_id, Capability.SWITCH.value, on)
+                except (LookupError, ValueError, CommandError) as exc:
+                    # execute() has already told the dashboards about a
+                    # failed command; the rest of the group still goes.
+                    log.info("group switch skipped %s: %s", device_id, exc)
+
     def seed_states(self, events: list[StateEvent]) -> None:
         """Pre-load cached readings (from the DB) so the dashboard is populated
         before the first live report arrives. Never overwrites live data."""
@@ -163,6 +227,7 @@ class Hub:
             "adapter": self._adapter.name,
             "connected": self._adapter_connected,
             "devices": [self._describe(d) for d in self._devices.values()],
+            "groups": self._groups.list(),
             "states": [s.to_dict() for s in self._states.values()],
             "pending": [
                 {"device_id": did, "capability": cap.value, "value": p.target}

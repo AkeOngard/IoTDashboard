@@ -29,6 +29,47 @@
 </div>
 {%- endmacro %}
 
+{% macro group_card(g) -%}
+{#- One group on the groups page: who is in it, and on/off for all of it. -#}
+<div class="pane flex flex-col gap-3 p-4 md:p-5">
+  <div class="flex items-start gap-3">
+    <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+          :class="{{ g }}.on > 0 ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : 'bg-[var(--tile)] text-[var(--faint)]'">
+      <span class="ic h-5 w-5" x-html="icon({{ g }}.kind === 'all' ? 'power' : {{ g }}.kind === 'room' ? 'room' : 'group')"></span>
+    </span>
+    <div class="min-w-0 flex-1">
+      <p class="truncate text-[16px] font-medium" x-text="{{ g }}.name"></p>
+      <p class="text-[13px] text-[var(--faint)]" x-text="{{ g }}.sub"></p>
+    </div>
+    <template x-if="{{ g }}.kind === 'custom'">
+      <button class="-mr-1 -mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] text-[var(--faint)] hover:bg-[var(--tile-hover)] hover:text-[var(--text)]"
+              @click="editGroup({{ g }})" :aria-label="'แก้กลุ่ม ' + {{ g }}.name">
+        <span class="ic h-[18px] w-[18px]" x-html="icon('pencil')"></span>
+      </button>
+    </template>
+  </div>
+  <div class="flex flex-wrap gap-1.5">
+    <template x-for="d in ({{ g }}.kind === 'custom' ? {{ g }}.devices : {{ g }}.members)" :key="d.id">
+      <a :href="deviceHref(d)"
+         class="inline-flex h-8 max-w-full items-center gap-1.5 rounded-full border px-2.5 text-[13px]"
+         :class="d.online && iconActive(d) ? 'border-[var(--accent-line)] bg-[var(--accent-soft)]' : 'border-[var(--line)] text-[var(--muted)]'">
+        <span class="dev-icon !h-4 !w-4" :class="d.online && iconActive(d) && 'is-active'" x-html="devIcon(d)"></span>
+        <span class="truncate" x-text="d.name"></span>
+      </a>
+    </template>
+    <span x-show="{{ g }}.kind === 'custom' && !{{ g }}.devices.length" class="text-[13px] text-[var(--faint)]">
+      ยังไม่มีอุปกรณ์ — กดดินสอเพื่อเพิ่ม
+    </span>
+  </div>
+  <div class="flex gap-2">
+    <button class="btn btn-ghost !h-10 flex-1" @click="switchGroup({{ g }}, true)"
+            :disabled="!{{ g }}.live.length || {{ g }}.on === {{ g }}.live.length">เปิดทั้งหมด</button>
+    <button class="btn btn-ghost !h-10 flex-1" @click="switchGroup({{ g }}, false)"
+            :disabled="!{{ g }}.on">ปิดทั้งหมด</button>
+  </div>
+</div>
+{%- endmacro %}
+
 {% macro chart_block() -%}
 <div>
   <div class="flex flex-wrap items-center gap-2.5">
@@ -130,6 +171,9 @@
       </a>
       <a href="#/devices" class="nav-link" :aria-current="page === 'devices' || page === 'device' ? 'page' : null">
         <span class="ic h-5 w-5" x-html="icon('devices')"></span>อุปกรณ์
+      </a>
+      <a href="#/groups" class="nav-link" :aria-current="page === 'groups' ? 'page' : null">
+        <span class="ic h-5 w-5" x-html="icon('group')"></span>กลุ่ม
       </a>
       <a href="#/alerts" class="nav-link" :aria-current="page === 'alerts' ? 'page' : null">
         <span class="ic h-5 w-5" x-html="icon('bell')"></span>แจ้งเตือน
@@ -270,14 +314,14 @@
               <section x-show="groups.length" class="pane p-4 md:p-5" aria-labelledby="groups-title">
                 <div class="mb-3 flex items-baseline justify-between gap-3">
                   <h2 id="groups-title" class="text-[16px] font-semibold">กลุ่มด่วน</h2>
-                  <span class="hidden text-[13px] text-[var(--faint)] sm:inline">เปิดหรือปิดทั้งกลุ่มในครั้งเดียว</span>
+                  <a href="#/groups" class="text-[14px] text-[var(--accent-text)] hover:underline">จัดการกลุ่ม</a>
                 </div>
                 <div class="no-scrollbar -mx-4 flex gap-2.5 overflow-x-auto px-4 md:mx-0 md:grid md:grid-cols-3 md:gap-3 md:overflow-visible md:px-0 xl:grid-cols-4">
                   <template x-for="g in groups" :key="g.key">
                     <div class="tile flex w-[160px] shrink-0 flex-col gap-3 p-3.5 md:w-auto" :class="g.on > 0 && 'is-on'">
                       <div class="flex items-center justify-between">
                         <span class="ic h-6 w-6" :class="g.on > 0 ? 'text-[var(--accent-text)]' : 'text-[var(--faint)]'"
-                              x-html="icon(g.kind === 'all' ? 'power' : 'room')"></span>
+                              x-html="icon(g.kind === 'all' ? 'power' : g.kind === 'room' ? 'room' : 'group')"></span>
                         <button class="toggle" :aria-pressed="g.on > 0 ? 'true' : 'false'"
                                 :aria-label="(g.on > 0 ? 'ปิด' : 'เปิด') + 'กลุ่ม ' + g.name"
                                 :disabled="!g.live.length" @click="toggleGroup(g)"></button>
@@ -563,6 +607,50 @@
         </div>
       </template>
 
+      <!-- ── groups ───────────────────────────────────────────────────── -->
+      <template x-if="page === 'groups'">
+        <div class="flex flex-col gap-6">
+          <div class="flex flex-wrap items-end gap-3">
+            <div class="mr-auto">
+              <h1 class="text-[26px] font-semibold leading-tight tracking-tight md:text-[30px]">กลุ่ม</h1>
+              <p class="mt-1 text-[14px] text-[var(--muted)]">สั่งหลายอุปกรณ์พร้อมกัน ข้ามห้องได้</p>
+            </div>
+            <button class="btn btn-accent" @click="newGroup()">
+              <span class="ic h-[18px] w-[18px]" x-html="icon('plus')"></span>สร้างกลุ่ม
+            </button>
+          </div>
+
+          <section aria-labelledby="made-title">
+            <h2 id="made-title" class="mb-3 text-[16px] font-semibold">กลุ่มที่สร้างเอง</h2>
+            <div class="grid items-start gap-3 md:grid-cols-2">
+              <template x-for="g in madeGroups" :key="g.key">
+                {{ group_card('g') }}
+              </template>
+            </div>
+            <template x-if="!madeGroups.length">
+              <div class="pane flex flex-col items-center px-6 py-10 text-center">
+                <span class="ic h-9 w-9 text-[var(--faint)]" x-html="icon('group')"></span>
+                <p class="mt-3 text-[16px] font-medium">ยังไม่มีกลุ่ม</p>
+                <p class="mt-1 max-w-[340px] text-[14px] text-[var(--muted)]">
+                  เช่น "ไฟชั้นล่าง" หรือ "ปิดก่อนนอน" — รวมอุปกรณ์จากหลายห้องไว้สั่งทีเดียว
+                </p>
+                <button class="btn btn-ghost mt-4" @click="newGroup()">สร้างกลุ่มแรก</button>
+              </div>
+            </template>
+          </section>
+
+          <section aria-labelledby="room-groups-title" x-show="roomGroups.length">
+            <h2 id="room-groups-title" class="text-[16px] font-semibold">ทั้งบ้านและตามห้อง</h2>
+            <p class="mb-3 mt-0.5 text-[13px] text-[var(--faint)]">สร้างให้เองจากห้องที่ตั้งไว้ในหน้าอุปกรณ์</p>
+            <div class="grid items-start gap-3 md:grid-cols-2">
+              <template x-for="g in roomGroups" :key="g.key">
+                {{ group_card('g') }}
+              </template>
+            </div>
+          </section>
+        </div>
+      </template>
+
       <!-- ── alerts ───────────────────────────────────────────────────── -->
       <!-- Only what is wrong right now. Nothing is stored: when a device
            reports the problem gone, its alert simply is not here any more. -->
@@ -601,13 +689,16 @@
   </div>
 
   <!-- ── tab bar (phone) ─────────────────────────────────────────────── -->
-  <nav class="pane fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-20 grid grid-cols-4 gap-1 p-1 md:hidden"
+  <nav class="pane fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-20 grid grid-cols-5 gap-0.5 p-1 md:hidden"
        aria-label="เมนูหลัก">
     <a href="#/" class="tab-link" :aria-current="page === 'overview' ? 'page' : null">
       <span class="ic h-6 w-6" x-html="icon('overview')"></span>ภาพรวม
     </a>
     <a href="#/devices" class="tab-link" :aria-current="page === 'devices' || page === 'device' ? 'page' : null">
       <span class="ic h-6 w-6" x-html="icon('devices')"></span>อุปกรณ์
+    </a>
+    <a href="#/groups" class="tab-link" :aria-current="page === 'groups' ? 'page' : null">
+      <span class="ic h-6 w-6" x-html="icon('group')"></span>กลุ่ม
     </a>
     <a href="#/alerts" class="tab-link relative" :aria-current="page === 'alerts' ? 'page' : null">
       <span class="ic h-6 w-6" x-html="icon('bell')"></span>แจ้งเตือน
@@ -630,6 +721,63 @@
       </div>
     </template>
   </div>
+
+  <!-- ── group editor ───────────────────────────────────────────────────── -->
+  <template x-if="groupEdit.open">
+    <div class="fixed inset-0 z-40 flex items-end justify-center bg-black/50 sm:items-center sm:p-6"
+         @click.self="groupEdit.open = false" @keydown.escape.window="groupEdit.open = false">
+      <div role="dialog" aria-modal="true" aria-labelledby="group-edit-title"
+           class="pane dense flex max-h-[92vh] w-full max-w-[480px] flex-col !rounded-b-none sm:!rounded-[24px]">
+        <div class="flex items-center justify-between px-6 pt-6">
+          <h2 id="group-edit-title" class="text-[20px] font-semibold tracking-tight"
+              x-text="groupEdit.id ? 'แก้กลุ่ม' : 'สร้างกลุ่ม'"></h2>
+          <button class="-mr-2 flex h-11 w-11 items-center justify-center rounded-xl hover:bg-[var(--tile-hover)]"
+                  @click="groupEdit.open = false" aria-label="ปิด">
+            <svg width="15" height="15" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
+        <div class="px-6 pt-4">
+          <label class="block">
+            <span class="mb-1.5 block text-[14px]">ชื่อกลุ่ม</span>
+            <input class="field" x-model="groupEdit.name" maxlength="60" placeholder="เช่น ไฟชั้นล่าง"
+                   x-init="$nextTick(() => $el.focus())" @keydown.enter="saveGroup()">
+          </label>
+          <p class="mt-5 text-[14px]">
+            อุปกรณ์ในกลุ่ม <span class="tabular-nums text-[var(--faint)]" x-text="'(' + groupEdit.devices.length + ')'"></span>
+          </p>
+        </div>
+        <div class="mt-1 min-h-0 flex-1 overflow-y-auto px-4">
+          <template x-for="r in memberChoices" :key="r.room">
+            <div class="py-2">
+              <p class="mb-1 px-2 text-[12px] font-medium text-[var(--faint)]" x-text="r.label"></p>
+              <template x-for="d in r.devices" :key="d.id">
+                <label class="flex min-h-11 cursor-pointer items-center gap-3 rounded-xl px-2 hover:bg-[var(--tile-hover)]">
+                  <input type="checkbox" class="h-5 w-5 shrink-0 accent-[var(--accent)]" :aria-label="d.name"
+                         :checked="groupEdit.devices.includes(d.id)" @change="toggleMember(d)">
+                  <span class="dev-icon !h-5 !w-5" x-html="devIcon(d)"></span>
+                  <span class="min-w-0 flex-1 truncate text-[15px]" x-text="d.name"></span>
+                  <span class="shrink-0 text-[12px] text-[var(--faint)]" x-show="!isSwitchable(d)">อ่านค่าอย่างเดียว</span>
+                </label>
+              </template>
+            </div>
+          </template>
+        </div>
+        <div class="border-t border-[var(--line)] px-6 py-4">
+          <p x-show="groupEdit.error" class="mb-3 text-[14px] text-[var(--danger-text)]" x-text="groupEdit.error"></p>
+          <div class="flex flex-wrap items-center gap-2">
+            <button class="btn btn-accent" @click="saveGroup()" :disabled="groupEdit.busy"
+                    x-text="groupEdit.busy ? 'กำลังบันทึก…' : 'บันทึก'"></button>
+            <button class="btn" @click="groupEdit.open = false">ยกเลิก</button>
+            <template x-if="groupEdit.id">
+              <button class="btn ml-auto text-[var(--danger-text)]" @click="deleteGroup()" :disabled="groupEdit.busy">ลบกลุ่ม</button>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+  </template>
 
   <!-- ── settings ───────────────────────────────────────────────────────── -->
   <template x-if="account.open">

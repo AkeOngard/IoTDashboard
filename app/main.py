@@ -23,9 +23,11 @@ from app.auth import SESSION_COOKIE, AuthStore, LoginThrottle
 from app.config import STATIC_DIR, TEMPLATES_DIR, settings
 from app.db import Database
 from app.hub import Hub
+from app.groups import GroupStore
 from app.labels import LabelStore
 from app.routes_auth import router as auth_router
 from app.routes_devices import router as devices_router
+from app.routes_groups import router as groups_router
 from app.telemetry import Recorder
 
 logging.basicConfig(
@@ -180,6 +182,9 @@ async def lifespan(app: FastAPI):
     labels.load()
     app.state.labels = labels
 
+    groups = GroupStore(settings.device_groups_path or None)
+    groups.load()
+
     auth = AuthStore(settings.auth_path or None, settings.session_secret)
     auth.load()
     app.state.auth = auth
@@ -199,6 +204,7 @@ async def lifespan(app: FastAPI):
         command_timeout=settings.command_timeout,
         recorder=recorder,
         labels=labels,
+        groups=groups,
     )
     app.state.hub = hub
 
@@ -260,6 +266,7 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_hosts)
 
 app.include_router(auth_router)
 app.include_router(devices_router)
+app.include_router(groups_router)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 

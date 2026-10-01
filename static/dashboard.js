@@ -71,9 +71,6 @@ function dashboard() {
      * Below it the spread is sensor noise, and a band there is just a glow
      * tracing the line. Capabilities not listed use 15% of the chart's span. */
     SWING: { temperature: 1, humidity: 5, battery: 2, illuminance: 50, brightness: 10, color_temp: 300 },
-    // Gap between the commands of a group switch, so a room full of lamps
-    // does not hit the Zigbee mesh in one burst.
-    BULK_GAP_MS: 150,
     // How many devices the overview shows when none are pinned.
     DEFAULT_PINS: 6,
 
@@ -82,7 +79,11 @@ function dashboard() {
     UNASSIGNED: 'Unassigned',
 
     devices: [], states: {}, pending: {}, toasts: [],
-    // Where we are: 'overview' | 'devices' | 'device' | 'alerts'.
+    // Groups the operator made, as the server keeps them: {id, name, devices}.
+    customGroups: [],
+    // The group being created or edited (id null for a new one).
+    groupEdit: { open: false, id: null, name: '', devices: [], busy: false, error: '' },
+    // Where we are: 'overview' | 'devices' | 'device' | 'groups' | 'alerts'.
     page: 'overview', detailId: null,
     // Devices page filter: 'all' | 'online' | 'attention'.
     filter: 'all',
@@ -144,6 +145,7 @@ function dashboard() {
         if (this._ws && this._ws.readyState === WebSocket.OPEN) this._ws.send('pong');
       } else if (msg.type === 'snapshot') {
         this.devices = msg.devices;
+        this.customGroups = msg.groups || [];
         this.adapterName = msg.adapter;
         this.adapterConnected = msg.connected;
         if ('history' in msg) this.historyEnabled = msg.history;
@@ -158,6 +160,9 @@ function dashboard() {
         // A rename: only the inventory changed, so leave state and pending
         // alone rather than replacing them with a whole new snapshot.
         this.devices = msg.devices;
+      } else if (msg.type === 'groups') {
+        // Made, changed or deleted on some dashboard -- maybe this one.
+        this.customGroups = msg.groups;
       } else if (msg.type === 'state') {
         this.states[this.key(msg.device_id, msg.capability)] = msg;
       } else if (msg.type === 'adapter') {
@@ -190,7 +195,7 @@ function dashboard() {
       } else {
         // detailId is left as it was: the device page's bindings run once
         // more while it is being torn down, and they need their device.
-        this.page = ['devices', 'alerts'].includes(page) ? page : 'overview';
+        this.page = ['devices', 'groups', 'alerts'].includes(page) ? page : 'overview';
       }
       this.editing = null;
       window.scrollTo(0, 0);
@@ -397,38 +402,128 @@ function dashboard() {
       };
     },
 
-    /* Groups: every room with something to switch, plus the whole house.
-     * A group reads as on while anything in it is on; switching it turns
-     * everything off, or, when all of it is already off, everything on. */
+    /* Groups: the whole house, every room with something to switch, and the
+     * groups the operator made. A group reads as on while anything in it is
+     * on; switching it turns everything off, or, when all of it is already
+     * off, everything on. */
     get groups() {
+      return this.roomGroups.concat(this.madeGroups);
+    },
+
+    get roomGroups() {
       this._tick;
       const all = this.devices.filter(d => this.isSwitchable(d));
       const out = [];
-      if (all.length) out.push({ key: 'all', name: 'ทั้งหมด', kind: 'all', members: all });
+      if (all.length) out.push(this.describeGroup({ key: 'all', name: 'ทั้งหมด', kind: 'all', members: all }));
       for (const room of this.rooms) {
         const members = all.filter(d => d.room === room);
-        if (members.length) out.push({ key: 'room:' + room, name: this.roomLabel(room), kind: 'room', members });
+        if (members.length) {
+          out.push(this.describeGroup({ key: 'room:' + room, name: this.roomLabel(room), kind: 'room', members }));
+        }
       }
-      return out.map(g => {
-        const live = g.members.filter(d => d.online);
-        const on = live.filter(d => this.isOn(d)).length;
-        const sub = !live.length ? 'ออฟไลน์ทั้งหมด'
-          : on === 0 ? 'ปิดทั้งหมด'
-          : on === live.length ? 'เปิดทั้งหมด'
-          : `เปิด ${on} จาก ${live.length}`;
-        return { ...g, live, on, sub };
+      return out;
+    },
+
+    get madeGroups() {
+      this._tick;
+      return this.customGroups.map(g => {
+        // Ids of devices that have left the fabric stay in the group, so
+        // they count in "members" but not here.
+        const devices = g.devices.map(id => this.devices.find(d => d.id === id)).filter(Boolean);
+        return this.describeGroup({
+          key: 'group:' + g.id, id: g.id, name: g.name, kind: 'custom',
+          devices, members: devices.filter(d => this.isSwitchable(d)),
+        });
       });
     },
 
-    toggleGroup(group) {
-      this.setMany(group.live, group.on === 0);
+    describeGroup(g) {
+      const live = g.members.filter(d => d.online);
+      const on = live.filter(d => this.isOn(d)).length;
+      const sub = !g.members.length ? 'ไม่มีอุปกรณ์ที่เปิดปิดได้'
+        : !live.length ? 'ออฟไลน์ทั้งหมด'
+        : on === 0 ? 'ปิดทั้งหมด'
+        : on === live.length ? 'เปิดทั้งหมด'
+        : `เปิด ${on} จาก ${live.length}`;
+      return { ...g, live, on, sub };
     },
 
-    /** Switch every device in `list` to `value`, one command at a time. */
-    async setMany(list, value) {
-      for (const d of list.filter(x => this.isOn(x) !== value)) {
-        this.send(d.id, 'switch', value);
-        await new Promise(r => setTimeout(r, this.BULK_GAP_MS));
+    toggleGroup(group) {
+      this.switchGroup(group, group.on === 0);
+    },
+
+    /** Switch a group on or off. The Pi sends the commands one at a time;
+     *  this page only makes one request and then follows the usual
+     *  pending -> confirmed messages for each device. */
+    async switchGroup(group, value) {
+      try {
+        if (group.kind === 'custom') {
+          await apiFetch(`/api/groups/${encodeURIComponent(group.id)}/switch`, { json: { value } });
+        } else {
+          await apiFetch('/api/devices/switch', { json: { devices: group.members.map(d => d.id), value } });
+        }
+      } catch (err) {
+        this.toast('error', 'สั่งทั้งกลุ่มไม่ได้', err.message);
+      }
+    },
+
+    // --------------------------------------------------------- group edit
+
+    newGroup() {
+      this.groupEdit = { open: true, id: null, name: '', devices: [], busy: false, error: '' };
+    },
+
+    editGroup(group) {
+      const stored = this.customGroups.find(g => g.id === group.id);
+      if (!stored) return;
+      this.groupEdit = { open: true, id: stored.id, name: stored.name, devices: [...stored.devices], busy: false, error: '' };
+    },
+
+    toggleMember(device) {
+      const ids = this.groupEdit.devices;
+      this.groupEdit.devices = ids.includes(device.id) ? ids.filter(id => id !== device.id) : ids.concat(device.id);
+    },
+
+    /** Devices to choose from, by room. */
+    get memberChoices() {
+      return this.rooms.map(room => ({
+        room, label: this.roomLabel(room),
+        devices: this.byRoom(room).slice().sort((a, b) => a.name.localeCompare(b.name, 'th')),
+      }));
+    },
+
+    async saveGroup() {
+      const edit = this.groupEdit;
+      const name = edit.name.trim();
+      if (!name) { edit.error = 'ตั้งชื่อกลุ่มก่อน'; return; }
+      edit.busy = true; edit.error = '';
+      try {
+        const body = { name, devices: edit.devices };
+        if (edit.id) {
+          await apiFetch(`/api/groups/${encodeURIComponent(edit.id)}`, { method: 'PATCH', json: body });
+        } else {
+          await apiFetch('/api/groups', { json: body });
+        }
+        // The new list arrives over the socket, for every open dashboard.
+        this.groupEdit.open = false;
+      } catch (err) {
+        edit.error = err.message;
+      } finally {
+        edit.busy = false;
+      }
+    },
+
+    async deleteGroup() {
+      const edit = this.groupEdit;
+      if (!edit.id || !window.confirm(`ลบกลุ่ม "${edit.name}"? อุปกรณ์ในกลุ่มไม่ได้หายไปไหน`)) return;
+      edit.busy = true;
+      try {
+        await apiFetch(`/api/groups/${encodeURIComponent(edit.id)}`, { method: 'DELETE' });
+        this.groupEdit.open = false;
+      } catch (err) {
+        edit.error = err.message;
+      } finally {
+        edit.busy = false;
       }
     },
 
@@ -1094,6 +1189,8 @@ const ICONS = (() => {
     chevron: svg('<path d="M9 5l7 7-7 7"/>'),
     power: svg('<path d="M12 3v8"/><path d="M6.4 6.6a8 8 0 1 0 11.2 0"/>'),
     room: svg('<path d="M4 20V9.5L12 4l8 5.5V20"/><path d="M9.5 20v-6h5v6"/>'),
+    group: svg('<path d="m12 3.5 8.5 4.3-8.5 4.3-8.5-4.3z"/><path d="m3.5 12 8.5 4.3 8.5-4.3"/><path d="m3.5 16.2 8.5 4.3 8.5-4.3"/>'),
+    plus: svg('<path d="M12 5v14M5 12h14"/>'),
     wifi: svg('<path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.8 16a4.8 4.8 0 0 1 6.4 0"/><circle cx="12" cy="19.2" r="1" fill="currentColor" stroke="none"/>'),
     thermo: svg('<path d="M9.5 13.8V5a2.2 2.2 0 1 1 4.4 0v8.8a4.6 4.6 0 1 1-4.4 0Z"/><path d="M11.7 9.5v6.8" stroke-width="2.6"/>'),
     'alert-offline': svg('<path d="M2.5 9a14 14 0 0 1 6-3.5M21.5 9a14 14 0 0 0-8.5-3.9M5.5 12.5a9.5 9.5 0 0 1 3-2M8.8 16a4.8 4.8 0 0 1 6.4 0M3 3l18 18"/>'),

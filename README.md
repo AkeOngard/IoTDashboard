@@ -157,6 +157,7 @@ MATTER_WS_URL=ws://<ip-ของ-linux-box>:5580/ws
 | `TELEMETRY_FLUSH_SECONDS` | `2` | หน่วงก่อน INSERT เป็นชุด · ตั้งสูงขึ้นเมื่อ database อยู่ไกล |
 | `RUN_MIGRATIONS` | `0` | ปกติ container `migrate` เป็นคนรัน |
 | `DEVICE_LABELS_PATH` | `data/labels.json` | ชื่อ/ห้องที่ตั้งเองในหน้าเว็บ · เว้นว่าง = ปิดการเปลี่ยนชื่อ |
+| `DEVICE_GROUPS_PATH` | `data/groups.json` | กลุ่มที่สร้างเองในหน้าเว็บ (เช่น "ไฟชั้นล่าง") · เว้นว่าง = ปิดการสร้างกลุ่ม (กลุ่มตามห้องยังใช้ได้) |
 | `PUBLIC_ORIGIN` | `http://localhost:8000` | CORS |
 | `ALLOWED_HOSTS` | `*` | TrustedHost (คั่นด้วย comma) — `127.0.0.1`/`localhost` ถูกเติมให้เองเพื่อ healthcheck · ถ้า `AUTH_PATH` ว่าง ค่า `*` จะถูกลดเหลือ loopback เท่านั้น (กัน DNS rebinding) |
 | `APP_BIND` | `0.0.0.0` | interface ที่เปิดพอร์ต dashboard · `127.0.0.1` = เข้าได้ผ่าน proxy เท่านั้น |
@@ -180,15 +181,21 @@ MATTER_WS_URL=ws://<ip-ของ-linux-box>:5580/ws
 | `GET` | `/api/auth/status` | `{required, configured, authenticated}` |
 | `GET` | `/healthz` | `degraded` เมื่อต่อ hub หรือ DB ไม่ได้ · ไม่ได้ล็อกอินจะเห็นแค่ `status` |
 | `GET` | `/readyz` | 503 เมื่อยังไม่พร้อมรับงานจริง |
-| `GET` | `/api/devices` | snapshot: devices + states + pending |
+| `GET` | `/api/devices` | snapshot: devices + groups + states + pending |
 | `POST` | `/api/devices/refresh` | สแกน fabric ใหม่ |
 | `POST` | `/api/devices/{id}/onoff` | `{"value": true}` |
 | `POST` | `/api/devices/{id}/level` | `{"value": 60, "capability": "brightness"}` |
 | `POST` | `/api/devices/{id}/command` | รูปทั่วไป — ที่หน้าเว็บเรียกจริง |
 | `PATCH` | `/api/devices/{id}/label` | `{"name": "โคมห้องนอน", "room": "ห้องนอน"}` · `""` = กลับไปใช้ชื่อจาก hub |
+| `POST` | `/api/devices/switch` | `{"devices": ["…"], "value": false}` · เปิด/ปิดหลายตัวในคำขอเดียว Pi ส่งทีละตัวห่างกัน 150 ms |
+| `GET` | `/api/groups` | กลุ่มที่สร้างเอง `{id, name, devices}` |
+| `POST` | `/api/groups` | `{"name": "ไฟชั้นล่าง", "devices": ["…"]}` |
+| `PATCH` | `/api/groups/{id}` | `{"name": …}` และ/หรือ `{"devices": […]}` |
+| `DELETE` | `/api/groups/{id}` | ลบกลุ่ม (อุปกรณ์ไม่ได้หายไปไหน) |
+| `POST` | `/api/groups/{id}/switch` | `{"value": true}` · ใช้ทางเดียวกับ `/api/devices/switch` |
 | `GET` | `/api/devices/{id}/history` | `?capability=temperature&hours=24&points=240` |
 | `POST` | `/api/devices/commission` | ปิดเป็นค่าเริ่มต้น (`ALLOW_HTTP_COMMISSION`) · ใช้ `make commission` แทน |
-| `WS` | `/ws` | push: `snapshot` · `devices` · `state` · `command` · `adapter` · `ping` |
+| `WS` | `/ws` | push: `snapshot` · `devices` · `groups` · `state` · `command` · `adapter` · `ping` |
 
 ## สิ่งที่ตั้งใจออกแบบไว้แบบนี้
 

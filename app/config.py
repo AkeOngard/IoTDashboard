@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     #: Local device names, kept outside the database so they survive the
     #: Pi-only deployment (DATABASE_URL empty). Set empty to disable renaming.
     device_labels_path: str = str(ROOT / "data" / "labels.json")
+    #: Groups the operator makes ("ไฟชั้นล่าง"), beside the labels for the
+    #: same reason. Set empty to disable making groups; rooms still work.
+    device_groups_path: str = str(ROOT / "data" / "groups.json")
     #: How long telemetry sits in memory before a batched INSERT. Worth raising
     #: over a slow or metered link to a managed database: it trades a little
     #: freshness in the chart for fewer round trips.
