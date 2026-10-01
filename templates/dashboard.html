@@ -70,6 +70,52 @@
 </div>
 {%- endmacro %}
 
+{% macro day_chips(days) -%}
+{#- Weekday toggles over a list of weekday numbers; none chosen = every day. -#}
+<div class="flex flex-wrap gap-1.5" role="group" aria-label="วัน">
+  <template x-for="w in WEEKDAYS" :key="w.d">
+    <button type="button" @click="toggleDay({{ days }}, w.d)" x-text="w.label"
+            :aria-pressed="({{ days }} || []).includes(w.d) ? 'true' : 'false'"
+            class="h-9 min-w-9 rounded-full border px-2.5 text-[14px] transition-colors"
+            :class="({{ days }} || []).includes(w.d) ?'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-ink)]' : 'border-[var(--line-strong)] text-[var(--muted)] hover:text-[var(--text)]'"></button>
+  </template>
+</div>
+{%- endmacro %}
+
+{% macro test_fields(t) -%}
+{#- A device test: which device, which reading, and what it should be. -#}
+<div class="flex flex-wrap items-center gap-2">
+  <select class="field !h-10 min-w-[150px] flex-1 !text-[15px]" x-model="{{ t }}.device" @change="fixTest({{ t }})" aria-label="อุปกรณ์">
+    <template x-for="d in devices" :key="d.id">
+      <option :value="d.id" :selected="d.id === {{ t }}.device" x-text="roomLabel(d.room) + ' · ' + d.name"></option>
+    </template>
+  </select>
+  <select class="field !h-10 !w-auto !text-[15px]" x-model="{{ t }}.capability" @change="fixTest({{ t }})" aria-label="ค่าที่ดู"
+          x-show="capsFor({{ t }}.device, false).length > 1">
+    <template x-for="cap in capsFor({{ t }}.device, false)" :key="cap">
+      <option :value="cap" :selected="cap === {{ t }}.capability" x-text="LABEL[cap] || cap"></option>
+    </template>
+  </select>
+  <template x-if="isBinary({{ t }}.capability)">
+    <div class="seg">
+      <button type="button" @click="{{ t }}.value = true" :aria-pressed="{{ t }}.value === true ? 'true' : 'false'"
+              x-text="(BINARY[{{ t }}.capability] || {}).true"></button>
+      <button type="button" @click="{{ t }}.value = false" :aria-pressed="{{ t }}.value === false ? 'true' : 'false'"
+              x-text="(BINARY[{{ t }}.capability] || {}).false"></button>
+    </div>
+  </template>
+  <template x-if="!isBinary({{ t }}.capability)">
+    <div class="flex items-center gap-2">
+      <select class="field !h-10 !w-auto !text-[15px]" x-model="{{ t }}.op" aria-label="เปรียบเทียบ">
+        <option value="gt">มากกว่า</option><option value="lt">น้อยกว่า</option>
+      </select>
+      <input type="number" step="any" class="field !h-10 !w-24 !text-[15px]" x-model.number="{{ t }}.value" aria-label="ค่า">
+      <span class="text-[14px] text-[var(--faint)]" x-text="CHART_UNIT[{{ t }}.capability] || ''"></span>
+    </div>
+  </template>
+</div>
+{%- endmacro %}
+
 {% macro chart_block() -%}
 <div>
   <div class="flex flex-wrap items-center gap-2.5">
@@ -175,6 +221,9 @@
       <a href="#/groups" class="nav-link" :aria-current="page === 'groups' ? 'page' : null">
         <span class="ic h-5 w-5" x-html="icon('group')"></span>กลุ่ม
       </a>
+      <a href="#/automations" class="nav-link" :aria-current="page === 'automations' ? 'page' : null">
+        <span class="ic h-5 w-5" x-html="icon('flow')"></span>อัตโนมัติ
+      </a>
       <a href="#/alerts" class="nav-link" :aria-current="page === 'alerts' ? 'page' : null">
         <span class="ic h-5 w-5" x-html="icon('bell')"></span>แจ้งเตือน
         <span x-show="issues.length" x-text="issues.length"
@@ -211,14 +260,19 @@
       <!-- Phone: a slim bar in place of the sidebar. -->
       <div class="mb-4 flex items-center gap-2 md:hidden">
         <span class="ic h-6 w-6 text-[var(--accent-text)]" x-html="icon('home')"></span>
-        <span class="text-[16px] font-semibold">IoT Gateway</span>
+        <span class="shrink-0 whitespace-nowrap text-[16px] font-semibold">IoT Gateway</span>
         <span class="h-2 w-2 shrink-0 rounded-full"
               :class="{ ok: 'bg-[var(--ok)]', warn: 'bg-[var(--warn)] is-pending', danger: 'bg-[var(--danger)] is-pending', muted: 'bg-[var(--faint)]' }[health.tone]"></span>
         <span class="min-w-0 truncate text-[12px] text-[var(--muted)]" x-show="health.tone !== 'ok'" x-text="health.text"></span>
-        <button class="-mr-2 ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
+        <button class="ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
                 @click="setTheme(theme === 'dark' ? 'light' : 'dark')"
                 :aria-label="theme === 'dark' ? 'เปลี่ยนเป็นโหมดสว่าง' : 'เปลี่ยนเป็นโหมดมืด'">
           <span class="ic h-5 w-5" x-html="icon(theme === 'dark' ? 'sun' : 'moon')"></span>
+        </button>
+        <!-- Settings live here on a phone: the tab bar holds the five pages. -->
+        <button class="-mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
+                @click="account.open = true" aria-label="ตั้งค่า">
+          <span class="ic h-5 w-5" x-html="icon('gear')"></span>
         </button>
       </div>
 
@@ -351,7 +405,8 @@
                   </div>
                 </section>
 
-                <section class="pane hidden p-5 md:block" aria-labelledby="alerts-title">
+                <div class="hidden flex-col gap-5 md:flex md:gap-6">
+                <section class="pane p-5" aria-labelledby="alerts-title">
                   <div class="mb-2 flex items-baseline justify-between gap-3">
                     <h2 id="alerts-title" class="text-[16px] font-semibold">แจ้งเตือน</h2>
                     <a href="#/alerts" class="text-[14px] text-[var(--accent-text)] hover:underline">ดูทั้งหมด</a>
@@ -372,6 +427,25 @@
                     <span class="ic h-5 w-5" x-html="icon('check')"></span>ทุกอย่างปกติ
                   </div>
                 </section>
+
+                <!-- What the rules did lately, once there are rules. -->
+                <section class="pane p-5" aria-labelledby="ruleact-title" x-show="rules.length">
+                  <div class="mb-2 flex items-baseline justify-between gap-3">
+                    <h2 id="ruleact-title" class="text-[16px] font-semibold">กฎล่าสุด</h2>
+                    <a href="#/automations" class="text-[14px] text-[var(--accent-text)] hover:underline">ดูทั้งหมด</a>
+                  </div>
+                  <template x-for="e in automations.log.slice(0, 4)" :key="e.ts + e.rule + e.result">
+                    <div class="flex items-start gap-2.5 py-1.5 text-[13px]">
+                      <span class="w-11 shrink-0 tabular-nums text-[var(--faint)]" x-text="clock(e.ts)"></span>
+                      <span class="min-w-0">
+                        <span class="block truncate font-medium" x-text="e.name"></span>
+                        <span class="block text-[var(--muted)]" x-text="runText(e)"></span>
+                      </span>
+                    </div>
+                  </template>
+                  <p class="text-[13px] text-[var(--faint)]" x-show="!automations.log.length">ยังไม่มีกฎทำงานตั้งแต่เปิดเครื่อง</p>
+                </section>
+                </div>
               </div>
 
               <!-- The house's climate over time, in place of an energy chart
@@ -588,6 +662,21 @@
                   <template x-if="staleness(detail)">
                     <p class="text-[13px]" :style="'color: ' + staleness(detail).color" x-text="staleness(detail).text"></p>
                   </template>
+
+                  <div class="border-t border-[var(--line)] pt-4">
+                    <p class="mb-1.5 text-[13px] text-[var(--faint)]">กฎที่ใช้อุปกรณ์นี้</p>
+                    <template x-for="r in rulesFor(detail)" :key="r.id">
+                      <a :href="'#/automations/' + encodeURIComponent(r.id)"
+                         class="-mx-2 flex items-center gap-2 rounded-xl px-2 py-2 text-[14px] hover:bg-[var(--tile-hover)]">
+                        <span class="ic h-4 w-4 text-[var(--accent-text)]" x-html="icon('flow')"></span>
+                        <span class="min-w-0 flex-1 truncate" x-text="r.name"></span>
+                        <span class="text-[12px] text-[var(--faint)]" x-show="!r.enabled">หยุดไว้</span>
+                      </a>
+                    </template>
+                    <p class="text-[14px] text-[var(--muted)]" x-show="!rulesFor(detail).length">
+                      ยังไม่มี — <a href="#/automations" class="text-[var(--accent-text)] hover:underline">สร้างกฎ</a>
+                    </p>
+                  </div>
                 </section>
 
                 <section class="pane p-5" aria-labelledby="history-title">
@@ -651,6 +740,248 @@
         </div>
       </template>
 
+      <!-- ── automations ────────────────────────────────────────────────── -->
+      <template x-if="page === 'automations'">
+        <div class="flex flex-col gap-5">
+          <div class="flex flex-wrap items-end gap-3">
+            <div class="mr-auto">
+              <h1 class="text-[26px] font-semibold leading-tight tracking-tight md:text-[30px]">อัตโนมัติ</h1>
+              <p class="mt-1 text-[14px] text-[var(--muted)]">เมื่อ → ถ้า → ให้ทำ · ทำงานบน Pi แม้ไม่มีใครเปิดหน้าเว็บ</p>
+            </div>
+            <button class="btn btn-accent" @click="newRule()" :disabled="!automations.enabled">
+              <span class="ic h-[18px] w-[18px]" x-html="icon('plus')"></span>สร้างกฎ
+            </button>
+          </div>
+
+          <template x-if="!automations.enabled">
+            <div class="pane p-5 text-[14px] text-[var(--warn-text)]">
+              ระบบอัตโนมัติปิดอยู่ — ตั้ง <code>AUTOMATIONS_PATH</code> บนเครื่องที่รัน dashboard เพื่อเปิด
+            </div>
+          </template>
+
+          <div class="grid items-start gap-5 lg:grid-cols-[minmax(0,330px)_minmax(0,1fr)]">
+            <!-- rules, then what they did lately -->
+            <div class="flex flex-col gap-3">
+              <template x-for="r in rules" :key="r.id">
+                <div class="pane flex items-center gap-3 p-3.5"
+                     :class="ruleEdit.open && ruleEdit.id === r.id && '!border-[var(--accent-line)]'">
+                  <button class="min-w-0 flex-1 rounded-lg text-left" @click="openRule(r.id)">
+                    <span class="block truncate text-[15px] font-medium" x-text="r.name"></span>
+                    <span class="block truncate text-[13px] text-[var(--faint)]"
+                          x-text="ruleStats(r).runs ? 'ทำงาน ' + ruleStats(r).runs + ' ครั้ง · ล่าสุด ' + clock(ruleStats(r).last) : (r.enabled ? 'ยังไม่เคยทำงาน' : 'หยุดไว้')"></span>
+                  </button>
+                  <button class="toggle" :aria-pressed="r.enabled ? 'true' : 'false'"
+                          :aria-label="(r.enabled ? 'หยุดกฎ ' : 'เปิดกฎ ') + r.name" @click="setRuleEnabled(r, !r.enabled)"></button>
+                </div>
+              </template>
+              <template x-if="!rules.length && automations.enabled">
+                <div class="pane flex flex-col items-center px-6 py-10 text-center">
+                  <span class="ic h-9 w-9 text-[var(--faint)]" x-html="icon('flow')"></span>
+                  <p class="mt-3 text-[16px] font-medium">ยังไม่มีกฎ</p>
+                  <p class="mt-1 max-w-[300px] text-[14px] text-[var(--muted)]">
+                    เช่น "22:30 ทุกวัน → ปิดไฟชั้นล่าง" หรือ "หน้าต่างเปิด → ปิดแอร์"
+                  </p>
+                  <button class="btn btn-ghost mt-4" @click="newRule()">สร้างกฎแรก</button>
+                </div>
+              </template>
+
+              <section class="pane mt-2 p-4" aria-labelledby="runlog-title" x-show="automations.log.length">
+                <h2 id="runlog-title" class="mb-2 text-[15px] font-semibold">ทำงานล่าสุด</h2>
+                <template x-for="(e, i) in automations.log.slice(0, 15)" :key="e.ts + e.rule + e.result">
+                  <!-- A phone shows five, so the editor is not pushed far down. -->
+                  <div class="items-start gap-2.5 py-1.5 text-[13px]" :class="i < 5 ? 'flex' : 'hidden lg:flex'">
+                    <span class="mt-[6px] h-2 w-2 shrink-0 rounded-full" :style="'background: ' + runColor(e)"></span>
+                    <span class="w-11 shrink-0 tabular-nums text-[var(--faint)]" x-text="clock(e.ts)"></span>
+                    <span class="min-w-0">
+                      <span class="block truncate font-medium" x-text="e.name"></span>
+                      <span class="block text-[var(--muted)]" x-text="runText(e)"></span>
+                    </span>
+                  </div>
+                </template>
+              </section>
+            </div>
+
+            <!-- the editor -->
+            <template x-if="!ruleEdit.open">
+              <div class="pane hidden px-6 py-16 text-center text-[14px] text-[var(--faint)] lg:block">
+                เลือกกฎทางซ้าย หรือสร้างกฎใหม่
+              </div>
+            </template>
+            <template x-if="ruleEdit.open">
+              <section id="rule-editor" class="pane flex scroll-mt-4 flex-col gap-5 p-5" aria-labelledby="rule-editor-title">
+                <div class="flex items-center gap-3">
+                  <h2 id="rule-editor-title" class="mr-auto text-[18px] font-semibold"
+                      x-text="ruleEdit.id ? 'แก้กฎ' : 'กฎใหม่'"></h2>
+                  <button class="-mr-2 flex h-10 w-10 items-center justify-center rounded-xl hover:bg-[var(--tile-hover)]"
+                          @click="closeEditor()" aria-label="ปิดตัวแก้กฎ">
+                    <span class="ic h-5 w-5" x-html="icon('close')"></span>
+                  </button>
+                </div>
+
+                <label class="block">
+                  <span class="mb-1.5 block text-[14px]">ชื่อกฎ</span>
+                  <input class="field" x-model="ruleEdit.draft.name" maxlength="60" placeholder="เช่น ปิดไฟก่อนนอน">
+                </label>
+
+                <p class="tile px-3.5 py-3 text-[14px] leading-relaxed" x-text="ruleText(ruleEdit.draft)"></p>
+
+                <!-- when -->
+                <div>
+                  <div class="mb-2 flex items-center justify-between gap-3">
+                    <h3 class="text-[15px] font-semibold">เมื่อ</h3>
+                    <div class="seg" role="group" aria-label="ชนิดตัวเริ่ม">
+                      <button type="button" @click="setTriggerType('time')"
+                              :aria-pressed="ruleEdit.draft.trigger.type === 'time' ? 'true' : 'false'">ถึงเวลา</button>
+                      <button type="button" @click="setTriggerType('device')"
+                              :aria-pressed="ruleEdit.draft.trigger.type === 'device' ? 'true' : 'false'">อุปกรณ์เปลี่ยน</button>
+                    </div>
+                  </div>
+                  <template x-if="ruleEdit.draft.trigger.type === 'time'">
+                    <div class="flex flex-col gap-2.5">
+                      <input type="time" class="field !w-36" x-model="ruleEdit.draft.trigger.at" aria-label="เวลา">
+                      {{ day_chips('ruleEdit.draft.trigger.days') }}
+                      <p class="text-[13px] text-[var(--faint)]" x-text="'ทำงาน' + daysText(ruleEdit.draft.trigger.days) + ' (ไม่เลือกวัน = ทุกวัน)'"></p>
+                    </div>
+                  </template>
+                  <template x-if="ruleEdit.draft.trigger.type === 'device'">
+                    <div>
+                      {{ test_fields('ruleEdit.draft.trigger') }}
+                      <p class="mt-2 text-[13px] text-[var(--faint)]">ทำงานตอนที่เพิ่งเปลี่ยนเป็นแบบนี้ ไม่ใช่ทุกครั้งที่อุปกรณ์ส่งค่า</p>
+                    </div>
+                  </template>
+                </div>
+
+                <!-- only if -->
+                <div>
+                  <h3 class="mb-2 text-[15px] font-semibold">และถ้า <span class="font-normal text-[var(--faint)]">(ไม่บังคับ)</span></h3>
+                  <div class="flex flex-col gap-2">
+                    <template x-for="(c, i) in ruleEdit.draft.conditions" :key="c._k">
+                      <div class="tile flex items-start gap-2 p-3">
+                        <div class="min-w-0 flex-1">
+                          <template x-if="c.type === 'time_between'">
+                            <div class="flex flex-wrap items-center gap-2 text-[14px]">
+                              ช่วง <input type="time" class="field !h-10 !w-32" x-model="c.from" aria-label="ตั้งแต่">
+                              ถึง <input type="time" class="field !h-10 !w-32" x-model="c.to" aria-label="ถึง">
+                            </div>
+                          </template>
+                          <template x-if="c.type === 'weekday'">
+                            {{ day_chips('c.days') }}
+                          </template>
+                          <template x-if="c.type === 'device'">
+                            {{ test_fields('c') }}
+                          </template>
+                        </div>
+                        <button class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[var(--faint)] hover:bg-[var(--tile-hover)] hover:text-[var(--danger-text)]"
+                                @click="ruleEdit.draft.conditions.splice(i, 1)" aria-label="เอาเงื่อนไขนี้ออก">
+                          <span class="ic h-[18px] w-[18px]" x-html="icon('close')"></span>
+                        </button>
+                      </div>
+                    </template>
+                  </div>
+                  <div class="mt-2 flex flex-wrap gap-2" x-show="ruleEdit.draft.conditions.length < 5">
+                    <button class="btn btn-ghost !h-9 !px-3 text-[14px]" @click="addCondition('time_between')">+ ช่วงเวลา</button>
+                    <button class="btn btn-ghost !h-9 !px-3 text-[14px]" @click="addCondition('weekday')">+ วัน</button>
+                    <button class="btn btn-ghost !h-9 !px-3 text-[14px]" @click="addCondition('device')">+ สถานะอุปกรณ์</button>
+                  </div>
+                </div>
+
+                <!-- then -->
+                <div>
+                  <h3 class="mb-2 text-[15px] font-semibold">ให้ทำ</h3>
+                  <div class="flex flex-col gap-2">
+                    <template x-for="(a, i) in ruleEdit.draft.actions" :key="a._k">
+                      <div class="tile flex items-start gap-2 p-3">
+                        <span class="mt-2.5 w-5 shrink-0 text-center text-[13px] tabular-nums text-[var(--faint)]" x-text="i + 1"></span>
+                        <div class="min-w-0 flex-1">
+                          <template x-if="a.type === 'group'">
+                            <div class="flex flex-wrap items-center gap-2">
+                              <div class="seg">
+                                <button type="button" @click="a.value = true" :aria-pressed="a.value ? 'true' : 'false'">เปิด</button>
+                                <button type="button" @click="a.value = false" :aria-pressed="!a.value ? 'true' : 'false'">ปิด</button>
+                              </div>
+                              <select class="field !h-10 min-w-[150px] flex-1 !text-[15px]" x-model="a.group" aria-label="กลุ่ม">
+                                <template x-for="t in groupTargets" :key="t.value">
+                                  <option :value="t.value" :selected="t.value === a.group" x-text="t.label"></option>
+                                </template>
+                              </select>
+                            </div>
+                          </template>
+                          <template x-if="a.type === 'device'">
+                            <div class="flex flex-wrap items-center gap-2">
+                              <select class="field !h-10 min-w-[150px] flex-1 !text-[15px]" x-model="a.device" @change="fixAction(a)" aria-label="อุปกรณ์">
+                                <template x-for="d in devices.filter(x => x.writable.length)" :key="d.id">
+                                  <option :value="d.id" :selected="d.id === a.device" x-text="roomLabel(d.room) + ' · ' + d.name"></option>
+                                </template>
+                              </select>
+                              <select class="field !h-10 !w-auto !text-[15px]" x-model="a.capability" @change="fixAction(a)" aria-label="สั่งอะไร"
+                                      x-show="capsFor(a.device, true).length > 1">
+                                <template x-for="cap in capsFor(a.device, true)" :key="cap">
+                                  <option :value="cap" :selected="cap === a.capability" x-text="LABEL[cap] || cap"></option>
+                                </template>
+                              </select>
+                              <template x-if="a.capability === 'switch'">
+                                <div class="seg">
+                                  <button type="button" @click="a.value = true" :aria-pressed="a.value === true ? 'true' : 'false'">เปิด</button>
+                                  <button type="button" @click="a.value = false" :aria-pressed="a.value === false ? 'true' : 'false'">ปิด</button>
+                                </div>
+                              </template>
+                              <template x-if="a.capability !== 'switch'">
+                                <div class="flex items-center gap-2">
+                                  <input type="number" class="field !h-10 !w-24 !text-[15px]" x-model.number="a.value" aria-label="ค่า"
+                                         :min="RANGE[a.capability] ? RANGE[a.capability][0] : null" :max="RANGE[a.capability] ? RANGE[a.capability][1] : null">
+                                  <span class="text-[14px] text-[var(--faint)]" x-text="UNIT[a.capability] || ''"></span>
+                                </div>
+                              </template>
+                            </div>
+                          </template>
+                          <template x-if="a.type === 'delay'">
+                            <div class="flex items-center gap-2 text-[14px]">
+                              รอ
+                              <input type="number" min="1" max="60" class="field !h-10 !w-20 !text-[15px]" aria-label="นาที"
+                                     :value="Math.round(a.seconds / 60) || 1"
+                                     @input="a.seconds = Math.max(1, Math.min(60, Math.round(+$event.target.value) || 1)) * 60">
+                              นาที แล้วค่อยทำข้อต่อไป
+                            </div>
+                          </template>
+                        </div>
+                        <button class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[var(--faint)] hover:bg-[var(--tile-hover)] hover:text-[var(--danger-text)]"
+                                @click="ruleEdit.draft.actions.splice(i, 1)" aria-label="เอาข้อนี้ออก">
+                          <span class="ic h-[18px] w-[18px]" x-html="icon('close')"></span>
+                        </button>
+                      </div>
+                    </template>
+                  </div>
+                  <div class="mt-2 flex flex-wrap gap-2" x-show="ruleEdit.draft.actions.length < 10">
+                    <button class="btn btn-ghost !h-9 !px-3 text-[14px]" @click="addAction('group')">+ สั่งกลุ่ม</button>
+                    <button class="btn btn-ghost !h-9 !px-3 text-[14px]" @click="addAction('device')">+ สั่งอุปกรณ์</button>
+                    <button class="btn btn-ghost !h-9 !px-3 text-[14px]" @click="addAction('delay')">+ รอ</button>
+                  </div>
+                </div>
+
+                <div class="border-t border-[var(--line)] pt-4">
+                  <p x-show="ruleEdit.error" class="mb-3 text-[14px] text-[var(--danger-text)]" x-text="ruleEdit.error"></p>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <button class="btn btn-accent" @click="saveRule()" :disabled="ruleEdit.busy"
+                            x-text="ruleEdit.busy ? 'กำลังบันทึก…' : 'บันทึก'"></button>
+                    <template x-if="ruleEdit.id">
+                      <button class="btn btn-ghost" @click="testRule()" title="ทำ &quot;ให้ทำ&quot; ทันที โดยไม่ดูเงื่อนไข">
+                        <span class="ic h-4 w-4" x-html="icon('play')"></span>ลองสั่งเลย
+                      </button>
+                    </template>
+                    <template x-if="ruleEdit.id">
+                      <button class="btn ml-auto text-[var(--danger-text)]" @click="deleteRule()" :disabled="ruleEdit.busy">ลบกฎ</button>
+                    </template>
+                  </div>
+                  <p class="mt-2 text-[13px] text-[var(--faint)]" x-show="ruleEdit.id">
+                    "ลองสั่งเลย" ทำตามรายการ "ให้ทำ" ทันทีโดยไม่ดูเวลาหรือเงื่อนไข — ใช้ฉบับที่บันทึกแล้ว
+                  </p>
+                </div>
+              </section>
+            </template>
+          </div>
+        </div>
+      </template>
+
       <!-- ── alerts ───────────────────────────────────────────────────── -->
       <!-- Only what is wrong right now. Nothing is stored: when a device
            reports the problem gone, its alert simply is not here any more. -->
@@ -700,14 +1031,14 @@
     <a href="#/groups" class="tab-link" :aria-current="page === 'groups' ? 'page' : null">
       <span class="ic h-6 w-6" x-html="icon('group')"></span>กลุ่ม
     </a>
+    <a href="#/automations" class="tab-link" :aria-current="page === 'automations' ? 'page' : null">
+      <span class="ic h-6 w-6" x-html="icon('flow')"></span>อัตโนมัติ
+    </a>
     <a href="#/alerts" class="tab-link relative" :aria-current="page === 'alerts' ? 'page' : null">
       <span class="ic h-6 w-6" x-html="icon('bell')"></span>แจ้งเตือน
       <span x-show="issues.length" x-text="issues.length"
             class="absolute right-[calc(50%-22px)] top-1.5 min-w-[18px] rounded-full bg-[var(--accent)] px-1 text-center text-[11px] font-semibold leading-[18px] text-[var(--accent-ink)]"></span>
     </a>
-    <button class="tab-link" @click="account.open = true">
-      <span class="ic h-6 w-6" x-html="icon('gear')"></span>ตั้งค่า
-    </button>
   </nav>
 
   <!-- ── toasts ─────────────────────────────────────────────────────────── -->

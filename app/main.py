@@ -6,7 +6,9 @@ import contextlib
 import hashlib
 import logging
 from contextlib import asynccontextmanager
+from datetime import tzinfo
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -19,6 +21,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.adapters import build_adapter
+from app.automations import AutomationEngine, AutomationStore
 from app.auth import SESSION_COOKIE, AuthStore, LoginThrottle
 from app.config import STATIC_DIR, TEMPLATES_DIR, settings
 from app.db import Database
@@ -27,6 +30,7 @@ from app.groups import GroupStore
 from app.labels import LabelStore
 from app.routes_auth import router as auth_router
 from app.routes_devices import router as devices_router
+from app.routes_automations import router as automations_router
 from app.routes_groups import router as groups_router
 from app.telemetry import Recorder
 
@@ -211,12 +215,30 @@ async def lifespan(app: FastAPI):
     log.info("starting with %s adapter (history: %s)", adapter.name, "on" if db.enabled else "off")
     hub.seed_states(await recorder.load_last_states())
     await hub.start()
+
+    rules = AutomationStore(settings.automations_path or None)
+    rules.load()
+    automations = AutomationEngine(hub, rules, _timezone(settings.timezone))
+    await automations.start()
+    app.state.automations = automations
     try:
         yield
     finally:
+        await automations.stop()
         await hub.stop()
         await recorder.stop()
         await db.stop()
+
+
+def _timezone(name: str) -> tzinfo | None:
+    """The house's time zone for time rules; None means the system's own."""
+    if not name:
+        return None
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        log.warning("unknown TIMEZONE %r: time rules use the system clock's zone", name)
+        return None
 
 
 async def _migrations(db: Database) -> dict[str, Any]:
@@ -267,6 +289,7 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_hosts)
 app.include_router(auth_router)
 app.include_router(devices_router)
 app.include_router(groups_router)
+app.include_router(automations_router)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
@@ -353,6 +376,7 @@ async def stream(websocket: WebSocket) -> None:
     try:
         snapshot = hub.snapshot()
         snapshot["history"] = app.state.db.available
+        snapshot["automations"] = app.state.automations.snapshot()
         await websocket.send_json(snapshot)
         while not reader.done():
             try:

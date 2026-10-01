@@ -83,7 +83,11 @@ function dashboard() {
     customGroups: [],
     // The group being created or edited (id null for a new one).
     groupEdit: { open: false, id: null, name: '', devices: [], busy: false, error: '' },
-    // Where we are: 'overview' | 'devices' | 'device' | 'groups' | 'alerts'.
+    // Automation rules, their recent runs and run counts, as the Pi has them.
+    automations: { enabled: true, rules: [], log: [], stats: {} },
+    // The rule open in the editor: a copy, so a broadcast never clobbers typing.
+    ruleEdit: { open: false, id: null, draft: null, busy: false, error: '' },
+    // Where we are: 'overview' | 'devices' | 'device' | 'groups' | 'automations' | 'alerts'.
     page: 'overview', detailId: null,
     // Devices page filter: 'all' | 'online' | 'attention'.
     filter: 'all',
@@ -102,7 +106,7 @@ function dashboard() {
       device: null, capability: null, hours: 24,
       loading: false, data: null, error: null, geo: emptyGeo(), drawn: false, hover: null,
     },
-    _ws: null, _backoff: 1000, _timers: {}, _toastSeq: 0, _tick: 0, _reqSeq: 0, _raf: 0, _plotEl: null,
+    _ws: null, _backoff: 1000, _timers: {}, _toastSeq: 0, _tick: 0, _reqSeq: 0, _raf: 0, _plotEl: null, _rowSeq: 0,
 
     init() {
       const root = document.documentElement;
@@ -146,6 +150,12 @@ function dashboard() {
       } else if (msg.type === 'snapshot') {
         this.devices = msg.devices;
         this.customGroups = msg.groups || [];
+        if (msg.automations) this.automations = msg.automations;
+        // A link straight to a rule (#/automations/<id>) waited for the list.
+        if (this.page === 'automations' && !this.ruleEdit.open) {
+          const id = location.hash.split('/')[2];
+          if (id) this.openRule(decodeURIComponent(id));
+        }
         this.adapterName = msg.adapter;
         this.adapterConnected = msg.connected;
         if ('history' in msg) this.historyEnabled = msg.history;
@@ -163,6 +173,11 @@ function dashboard() {
       } else if (msg.type === 'groups') {
         // Made, changed or deleted on some dashboard -- maybe this one.
         this.customGroups = msg.groups;
+      } else if (msg.type === 'automations') {
+        this.automations = { enabled: msg.enabled, rules: msg.rules, log: msg.log, stats: msg.stats };
+      } else if (msg.type === 'automation_run') {
+        this.automations.log = [msg.entry].concat(this.automations.log).slice(0, 100);
+        this.automations.stats = msg.stats;
       } else if (msg.type === 'state') {
         this.states[this.key(msg.device_id, msg.capability)] = msg;
       } else if (msg.type === 'adapter') {
@@ -195,7 +210,9 @@ function dashboard() {
       } else {
         // detailId is left as it was: the device page's bindings run once
         // more while it is being torn down, and they need their device.
-        this.page = ['devices', 'groups', 'alerts'].includes(page) ? page : 'overview';
+        this.page = ['devices', 'groups', 'automations', 'alerts'].includes(page) ? page : 'overview';
+        // #/automations/<id> opens that rule.
+        if (page === 'automations' && id) this.$nextTick(() => this.openRule(decodeURIComponent(id)));
       }
       this.editing = null;
       window.scrollTo(0, 0);
@@ -818,6 +835,274 @@ function dashboard() {
       }
     },
 
+    // -------------------------------------------------------- automations
+
+    // Weekday chips, Monday first; values match Python's weekday().
+    WEEKDAYS: [
+      { d: 0, label: 'จ' }, { d: 1, label: 'อ' }, { d: 2, label: 'พ' }, { d: 3, label: 'พฤ' },
+      { d: 4, label: 'ศ' }, { d: 5, label: 'ส' }, { d: 6, label: 'อา' },
+    ],
+    // On/off readings and what each side is called.
+    BINARY: {
+      switch: { true: 'เปิด', false: 'ปิด' },
+      contact: { true: 'ปิดสนิท', false: 'เปิดอยู่' },
+      occupancy: { true: 'มีคน', false: 'ว่าง' },
+    },
+    // A sensible first value when a number capability is picked.
+    NUMBER_DEFAULT: { temperature: 30, humidity: 70, illuminance: 100, battery: 20, brightness: 100, color_temp: 3000 },
+    OP_LABEL: { gt: 'มากกว่า', lt: 'น้อยกว่า', eq: 'เท่ากับ', ne: 'ไม่เท่ากับ' },
+
+    isBinary(cap) { return cap in this.BINARY; },
+
+    get rules() { return this.automations.rules; },
+
+    ruleStats(rule) { return this.automations.stats[rule.id] || { runs: 0, last: null }; },
+
+    /** Rules that read or drive this device, for its page. */
+    rulesFor(device) {
+      const uses = (r) => r.trigger.device === device.id
+        || r.conditions.some(c => c.device === device.id)
+        || r.actions.some(a => a.device === device.id
+          || (a.type === 'group' && (this.groupDeviceIds(a.group) || []).includes(device.id)));
+      return this.rules.filter(uses);
+    },
+
+    groupDeviceIds(target) {
+      if (target === 'all') return this.devices.map(d => d.id);
+      if (target.startsWith('room:')) return this.byRoom(target.slice(5)).map(d => d.id);
+      const g = this.customGroups.find(x => x.id === target);
+      return g ? g.devices : null;
+    },
+
+    /** Everything an action can switch as a group. */
+    get groupTargets() {
+      return [{ value: 'all', label: 'ทั้งบ้าน' }]
+        .concat(this.rooms.map(r => ({ value: 'room:' + r, label: 'ห้อง ' + this.roomLabel(r) })))
+        .concat(this.customGroups.map(g => ({ value: g.id, label: 'กลุ่ม ' + g.name })));
+    },
+
+    targetLabel(target) {
+      const t = this.groupTargets.find(x => x.value === target);
+      return t ? t.label : 'กลุ่มที่ถูกลบไปแล้ว';
+    },
+
+    deviceById(id) { return this.devices.find(d => d.id === id) || null; },
+
+    /** Capabilities to offer: anything readable for a test, only writable
+     *  ones for an action. */
+    capsFor(deviceId, writable) {
+      const d = this.deviceById(deviceId);
+      if (!d) return [];
+      return writable ? d.writable : d.capabilities;
+    },
+
+    /** A new rule starts as the commonest case: a time, switching a group off. */
+    newRule() {
+      this.openEditor(null, {
+        name: '', enabled: true,
+        trigger: { type: 'time', at: '22:00', days: [] },
+        conditions: [],
+        actions: [{ type: 'group', group: 'all', value: false }],
+      });
+    },
+
+    openRule(id) {
+      const rule = this.rules.find(r => r.id === id);
+      if (rule) this.openEditor(rule.id, rule);
+    },
+
+    openEditor(id, rule) {
+      const draft = JSON.parse(JSON.stringify(rule));
+      // A key per row, so removing one never makes the row below change
+      // type in place. The server ignores the extra field.
+      draft.conditions.forEach(c => { c._k = ++this._rowSeq; });
+      draft.actions.forEach(a => { a._k = ++this._rowSeq; });
+      this.ruleEdit = { open: true, id, draft, busy: false, error: '' };
+      // On a phone the editor sits under the list: bring it into view once
+      // its template has rendered (a tick later than $nextTick).
+      if (window.innerWidth < 1024) {
+        setTimeout(() => document.getElementById('rule-editor')?.scrollIntoView({ block: 'start' }), 60);
+      }
+    },
+
+    closeEditor() { this.ruleEdit.open = false; },
+
+    setTriggerType(type) {
+      const first = this.devices[0];
+      this.ruleEdit.draft.trigger = type === 'time'
+        ? { type: 'time', at: '22:00', days: [] }
+        : this.fixTest({ type: 'device', device: first ? first.id : '', capability: '', op: 'eq', value: true });
+    },
+
+    toggleDay(list, d) {
+      if (!list) return;
+      const i = list.indexOf(d);
+      if (i >= 0) list.splice(i, 1); else list.push(d);
+      list.sort();
+    },
+
+    /** After the device or capability of a test changes, keep it valid. */
+    fixTest(test) {
+      const caps = this.capsFor(test.device, false);
+      if (!caps.includes(test.capability)) test.capability = caps[0] || '';
+      if (this.isBinary(test.capability)) {
+        test.op = 'eq';
+        if (typeof test.value !== 'boolean') test.value = test.capability !== 'contact';
+      } else {
+        if (!['gt', 'lt'].includes(test.op)) test.op = 'gt';
+        if (typeof test.value !== 'number') test.value = this.NUMBER_DEFAULT[test.capability] ?? 0;
+      }
+      return test;
+    },
+
+    fixAction(action) {
+      const caps = this.capsFor(action.device, true);
+      if (!caps.includes(action.capability)) action.capability = caps[0] || 'switch';
+      if (action.capability === 'switch') {
+        if (typeof action.value !== 'boolean') action.value = true;
+      } else if (typeof action.value !== 'number') {
+        action.value = this.NUMBER_DEFAULT[action.capability] ?? 50;
+      }
+      return action;
+    },
+
+    addCondition(type) {
+      const c = this.ruleEdit.draft.conditions, _k = ++this._rowSeq;
+      if (type === 'time_between') c.push({ _k, type, from: '18:00', to: '06:00' });
+      else if (type === 'weekday') c.push({ _k, type, days: [0, 1, 2, 3, 4] });
+      else {
+        const first = this.devices[0];
+        c.push(this.fixTest({ _k, type: 'device', device: first ? first.id : '', capability: '', op: 'eq', value: true }));
+      }
+    },
+
+    addAction(type) {
+      const a = this.ruleEdit.draft.actions, _k = ++this._rowSeq;
+      if (type === 'group') a.push({ _k, type, group: 'all', value: false });
+      else if (type === 'delay') a.push({ _k, type, seconds: 300 });
+      else {
+        const first = this.devices.find(d => d.writable.length);
+        a.push(this.fixAction({ _k, type: 'device', device: first ? first.id : '', capability: '', value: true }));
+      }
+    },
+
+    // ----- words
+
+    daysText(days) {
+      if (!days || !days.length || days.length === 7) return 'ทุกวัน';
+      if (days.join() === '0,1,2,3,4') return 'วันธรรมดา';
+      if (days.join() === '5,6') return 'เสาร์-อาทิตย์';
+      return days.map(d => this.WEEKDAYS[d].label).join(' ');
+    },
+
+    /** "หน้าต่างครัว เปิดอยู่", "เซนเซอร์ อุณหภูมิ มากกว่า 30°C". */
+    testText(t) {
+      const d = this.deviceById(t.device);
+      const name = d ? d.name : 'อุปกรณ์ที่หายไป';
+      if (this.isBinary(t.capability)) {
+        const word = this.BINARY[t.capability][String(t.value)];
+        return `${name} ${t.op === 'ne' ? 'ไม่' : ''}${word}`;
+      }
+      return `${name} ${this.LABEL[t.capability] || t.capability} ${this.OP_LABEL[t.op]} ${t.value}${this.CHART_UNIT[t.capability] || ''}`;
+    },
+
+    actionText(a) {
+      if (a.type === 'delay') return `รอ ${Math.round(a.seconds / 60) || 1} นาที`;
+      if (a.type === 'group') return `${a.value ? 'เปิด' : 'ปิด'}${this.targetLabel(a.group)}`;
+      const d = this.deviceById(a.device);
+      const name = d ? d.name : 'อุปกรณ์ที่หายไป';
+      if (a.capability === 'switch') return `${a.value ? 'เปิด' : 'ปิด'} ${name}`;
+      return `ตั้ง${this.LABEL[a.capability]} ${name} เป็น ${a.value}${this.UNIT[a.capability] || ''}`;
+    },
+
+    /** The whole rule in one sentence. */
+    ruleText(rule) {
+      const t = rule.trigger;
+      const when = t.type === 'time' ? `เวลา ${t.at} ${this.daysText(t.days)}` : `เมื่อ ${this.testText(t)}`;
+      const ifs = rule.conditions.map(c => c.type === 'time_between' ? `ช่วง ${c.from}–${c.to}`
+        : c.type === 'weekday' ? `เป็น${this.daysText(c.days)}` : this.testText(c));
+      const thens = rule.actions.map(a => this.actionText(a));
+      return when + (ifs.length ? ' และถ้า ' + ifs.join(', ') : '') + ' → ' + (thens.join(' → ') || '…');
+    },
+
+    runText(entry) {
+      const why = { time: 'ตามเวลา', device: 'อุปกรณ์เปลี่ยน', test: 'ลองสั่ง' }[entry.why] || entry.why;
+      const skipped = { time_between: 'นอกช่วงเวลา', weekday: 'ไม่ใช่วันที่กำหนด', device: 'สถานะอุปกรณ์ไม่ตรง' };
+      const result = {
+        ran: 'ทำงานแล้ว',
+        skipped: 'ข้าม — ' + (skipped[entry.detail] || 'เงื่อนไขไม่ตรง'),
+        failed: 'ไม่สำเร็จ — ' + entry.detail,
+        limited: 'หยุดไว้ — ทำงานถี่เกินไป อาจวนกับกฎอื่น',
+        cancelled: 'ยกเลิก — กฎถูกแก้ระหว่างรอ',
+      }[entry.result] || entry.result;
+      return `${why} · ${result}`;
+    },
+
+    runColor(entry) {
+      return { ran: 'var(--ok)', skipped: 'var(--faint)', cancelled: 'var(--faint)' }[entry.result] || 'var(--warn)';
+    },
+
+    clock(ts) {
+      return new Date(ts * 1000).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+    },
+
+    // ----- saving
+
+    async saveRule() {
+      const edit = this.ruleEdit;
+      if (!edit.draft.name.trim()) { edit.error = 'ตั้งชื่อกฎก่อน'; return; }
+      edit.busy = true; edit.error = '';
+      try {
+        const body = { ...edit.draft, name: edit.draft.name.trim() };
+        const saved = edit.id
+          ? await apiFetch(`/api/automations/${encodeURIComponent(edit.id)}`, { method: 'PATCH', json: body })
+          : await apiFetch('/api/automations', { json: body });
+        // Stay on the rule, now saved: the list itself arrives over the socket.
+        this.openEditor(saved.id, saved);
+        this.toast('ok', 'บันทึกกฎแล้ว', saved.name);
+      } catch (err) {
+        edit.error = err.message;
+      } finally {
+        edit.busy = false;
+      }
+    },
+
+    async setRuleEnabled(rule, enabled) {
+      try {
+        await apiFetch(`/api/automations/${encodeURIComponent(rule.id)}`, { method: 'PATCH', json: { enabled } });
+        if (this.ruleEdit.id === rule.id && this.ruleEdit.draft) this.ruleEdit.draft.enabled = enabled;
+      } catch (err) {
+        this.toast('error', 'เปลี่ยนสถานะกฎไม่ได้', err.message);
+      }
+    },
+
+    async testRule() {
+      try {
+        await apiFetch(`/api/automations/${encodeURIComponent(this.ruleEdit.id)}/run`, { method: 'POST' });
+        // The log entry only lands when the run ends, which a "wait" can
+        // put minutes away: say now that it started.
+        const waits = this.ruleEdit.draft.actions.some(a => a.type === 'delay');
+        this.toast('ok', 'เริ่มทำตามกฎแล้ว',
+                   waits ? 'กฎนี้มีขั้นรอ ผลจะขึ้นในบันทึกเมื่อทำครบ' : 'ผลจะขึ้นในบันทึกในอีกครู่');
+      } catch (err) {
+        this.toast('error', 'ลองสั่งไม่ได้', err.message);
+      }
+    },
+
+    async deleteRule() {
+      const edit = this.ruleEdit;
+      if (!edit.id || !window.confirm(`ลบกฎ "${edit.draft.name}"?`)) return;
+      edit.busy = true;
+      try {
+        await apiFetch(`/api/automations/${encodeURIComponent(edit.id)}`, { method: 'DELETE' });
+        this.ruleEdit.open = false;
+      } catch (err) {
+        edit.error = err.message;
+      } finally {
+        edit.busy = false;
+      }
+    },
+
     // ------------------------------------------------------------ account
 
     account: { open: false, current: '', next: '', busy: false, error: '', done: false },
@@ -1191,6 +1476,9 @@ const ICONS = (() => {
     room: svg('<path d="M4 20V9.5L12 4l8 5.5V20"/><path d="M9.5 20v-6h5v6"/>'),
     group: svg('<path d="m12 3.5 8.5 4.3-8.5 4.3-8.5-4.3z"/><path d="m3.5 12 8.5 4.3 8.5-4.3"/><path d="m3.5 16.2 8.5 4.3 8.5-4.3"/>'),
     plus: svg('<path d="M12 5v14M5 12h14"/>'),
+    flow: svg('<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.5 6H14a3.5 3.5 0 0 1 3.5 3.5V15.5"/><path d="m15 13 2.5 2.5L20 13"/>'),
+    play: svg('<path d="M8 5.5v13l10.5-6.5z"/>'),
+    close: svg('<path d="M6 6l12 12M18 6 6 18"/>'),
     wifi: svg('<path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.8 16a4.8 4.8 0 0 1 6.4 0"/><circle cx="12" cy="19.2" r="1" fill="currentColor" stroke="none"/>'),
     thermo: svg('<path d="M9.5 13.8V5a2.2 2.2 0 1 1 4.4 0v8.8a4.6 4.6 0 1 1-4.4 0Z"/><path d="M11.7 9.5v6.8" stroke-width="2.6"/>'),
     'alert-offline': svg('<path d="M2.5 9a14 14 0 0 1 6-3.5M21.5 9a14 14 0 0 0-8.5-3.9M5.5 12.5a9.5 9.5 0 0 1 3-2M8.8 16a4.8 4.8 0 0 1 6.4 0M3 3l18 18"/>'),

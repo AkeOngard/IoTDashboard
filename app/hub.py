@@ -68,6 +68,8 @@ class Hub:
         self._groups = groups or GroupStore(None)
         # Group switches still sending, with the devices each will touch.
         self._bulk: dict[asyncio.Task, frozenset[str]] = {}
+        # Called with (event, previous) on every state report: automations.
+        self._listeners: list[Any] = []
         self._devices: dict[str, Device] = {}
         self._states: dict[tuple[str, Capability], StateEvent] = {}
         self._pending: dict[tuple[str, Capability], _Pending] = {}
@@ -148,6 +150,28 @@ class Hub:
             {"type": "devices", "devices": [self._describe(d) for d in self._devices.values()]}
         )
         return device
+
+    # ------------------------------------------------- for automations
+
+    def add_listener(self, listener: Any) -> None:
+        """Have `listener(event, previous)` called on every state report. It
+        runs inline, so it must be quick and must not block."""
+        self._listeners.append(listener)
+
+    async def publish(self, message: dict[str, Any]) -> None:
+        """Send a message to every open dashboard."""
+        await self._broadcast(message)
+
+    def state_value(self, device_id: str, capability: str) -> Any:
+        try:
+            state = self._states.get((device_id, Capability(capability)))
+        except ValueError:
+            return None
+        return state.value if state is not None else None
+
+    def described(self) -> list[dict[str, Any]]:
+        """Devices as the dashboard sees them: local names and rooms applied."""
+        return [self._describe(d) for d in self._devices.values()]
 
     # ---------------------------------------------------------------- groups
 
@@ -324,6 +348,12 @@ class Hub:
         key = (event.device_id, event.capability)
         previous = self._states.get(key)
         self._states[key] = event
+
+        for listener in self._listeners:
+            try:
+                listener(event, previous)
+            except Exception as exc:  # noqa: BLE001 - a bad rule must not stop the house
+                log.warning("state listener failed: %s", exc)
 
         if self._recorder is not None:
             await self._recorder.record(event)

@@ -158,6 +158,8 @@ MATTER_WS_URL=ws://<ip-ของ-linux-box>:5580/ws
 | `RUN_MIGRATIONS` | `0` | ปกติ container `migrate` เป็นคนรัน |
 | `DEVICE_LABELS_PATH` | `data/labels.json` | ชื่อ/ห้องที่ตั้งเองในหน้าเว็บ · เว้นว่าง = ปิดการเปลี่ยนชื่อ |
 | `DEVICE_GROUPS_PATH` | `data/groups.json` | กลุ่มที่สร้างเองในหน้าเว็บ (เช่น "ไฟชั้นล่าง") · เว้นว่าง = ปิดการสร้างกลุ่ม (กลุ่มตามห้องยังใช้ได้) |
+| `AUTOMATIONS_PATH` | `data/automations.json` | กฎอัตโนมัติ · เว้นว่าง = ปิดระบบอัตโนมัติ |
+| `TIMEZONE` | `Asia/Bangkok` | เวลาของบ้านสำหรับกฎตามเวลา — container รันเป็น UTC ถ้าไม่ตั้ง "22:30" จะกลายเป็นตี 5 ครึ่ง |
 | `PUBLIC_ORIGIN` | `http://localhost:8000` | CORS |
 | `ALLOWED_HOSTS` | `*` | TrustedHost (คั่นด้วย comma) — `127.0.0.1`/`localhost` ถูกเติมให้เองเพื่อ healthcheck · ถ้า `AUTH_PATH` ว่าง ค่า `*` จะถูกลดเหลือ loopback เท่านั้น (กัน DNS rebinding) |
 | `APP_BIND` | `0.0.0.0` | interface ที่เปิดพอร์ต dashboard · `127.0.0.1` = เข้าได้ผ่าน proxy เท่านั้น |
@@ -193,9 +195,14 @@ MATTER_WS_URL=ws://<ip-ของ-linux-box>:5580/ws
 | `PATCH` | `/api/groups/{id}` | `{"name": …}` และ/หรือ `{"devices": […]}` |
 | `DELETE` | `/api/groups/{id}` | ลบกลุ่ม (อุปกรณ์ไม่ได้หายไปไหน) |
 | `POST` | `/api/groups/{id}/switch` | `{"value": true}` · ใช้ทางเดียวกับ `/api/devices/switch` |
+| `GET` | `/api/automations` | `{enabled, rules, log, stats}` — log และจำนวนครั้งเก็บในหน่วยความจำ หายเมื่อรีสตาร์ต |
+| `POST` | `/api/automations` | กฎ: `{name, trigger, conditions, actions}` ดูรูปแบบใน `app/automations.py` |
+| `PATCH` | `/api/automations/{id}` | ทั้งกฎหรือบางส่วน · `{"enabled": false}` = หยุดไว้ |
+| `DELETE` | `/api/automations/{id}` | ลบกฎ (รอบที่กำลังรออยู่ถูกยกเลิก) |
+| `POST` | `/api/automations/{id}/run` | ทำ actions ทันที ไม่ดู trigger/เงื่อนไข — ปุ่ม "ลองสั่งเลย" |
 | `GET` | `/api/devices/{id}/history` | `?capability=temperature&hours=24&points=240` |
 | `POST` | `/api/devices/commission` | ปิดเป็นค่าเริ่มต้น (`ALLOW_HTTP_COMMISSION`) · ใช้ `make commission` แทน |
-| `WS` | `/ws` | push: `snapshot` · `devices` · `groups` · `state` · `command` · `adapter` · `ping` |
+| `WS` | `/ws` | push: `snapshot` · `devices` · `groups` · `automations` · `automation_run` · `state` · `command` · `adapter` · `ping` |
 
 ## สิ่งที่ตั้งใจออกแบบไว้แบบนี้
 

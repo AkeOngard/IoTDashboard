@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     #: Groups the operator makes ("ไฟชั้นล่าง"), beside the labels for the
     #: same reason. Set empty to disable making groups; rooms still work.
     device_groups_path: str = str(ROOT / "data" / "groups.json")
+    #: Automation rules. Set empty to switch automations off entirely.
+    automations_path: str = str(ROOT / "data" / "automations.json")
+    #: The house's clock, for time rules. The container itself runs on UTC,
+    #: so "22:30" would otherwise mean 05:30 in Bangkok.
+    timezone: str = "Asia/Bangkok"
     #: How long telemetry sits in memory before a batched INSERT. Worth raising
     #: over a slow or metered link to a managed database: it trades a little
     #: freshness in the chart for fewer round trips.

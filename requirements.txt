@@ -4,3 +4,6 @@ aiohttp>=3.9
 asyncpg>=0.29
 jinja2>=3.1
 pydantic-settings>=2.4
+# Time-zone data for automation time rules: the slim image has none, and
+# without it "Asia/Bangkok" cannot be looked up. Pure Python, no build.
+tzdata>=2024.1
