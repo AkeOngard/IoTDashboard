@@ -290,7 +290,10 @@
           </div>
           <div class="hidden md:block">
             <h1 class="text-[30px] font-semibold leading-tight tracking-tight">ภาพรวม</h1>
-            <p class="mt-1 text-[14px] text-[var(--muted)]" x-text="'บ้าน · ' + today"></p>
+            <p class="mt-2 flex items-baseline gap-3">
+              <span class="text-[40px] font-semibold leading-none tracking-tight tabular-nums" x-text="clockNow"></span>
+              <span class="text-[14px] text-[var(--muted)]" x-text="today + ' · บ้าน'"></span>
+            </p>
           </div>
 
           <!-- Empty state names the actual blocker: no server, no

@@ -116,8 +116,12 @@ function dashboard() {
       this.syncThemeColor();
       try { this.pins = JSON.parse(localStorage.getItem('iot.pins') || '[]'); } catch (e) { this.pins = []; }
       this.connect();
-      // Drives the clock, the greeting and the staleness labels.
-      setInterval(() => { this._tick++; }, 15000);
+      // Drives the clock, the greeting and the staleness labels. The first
+      // tick lands on the next whole minute so the big clock turns over on
+      // time; after that every 15 s stays on the :00/:15/:30/:45 grid.
+      const tick = () => { this._tick++; };
+      setTimeout(() => { tick(); setInterval(tick, 15000); },
+                 60000 - (Date.now() % 60000));
       window.addEventListener('hashchange', () => this.route());
       this.route();
     },
@@ -279,11 +283,16 @@ function dashboard() {
       return 'สวัสดีตอนดึก';
     },
 
+    /** "21:14": the big clock on the desktop overview. */
+    get clockNow() {
+      this._tick;
+      return new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+    },
+
+    /** "พฤ. 2 ต.ค.": the date beside that clock. */
     get today() {
       this._tick;
-      const d = new Date();
-      return d.toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short' })
-        + ' · ' + d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+      return new Date().toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short' });
     },
 
     /** "ออนไลน์ 9 จาก 10 อุปกรณ์ · ในบ้าน 21.5°C": the house in one line. */
