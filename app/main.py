@@ -26,6 +26,7 @@ from app.auth import SESSION_COOKIE, AuthStore, LoginThrottle
 from app.config import STATIC_DIR, TEMPLATES_DIR, settings
 from app.db import Database
 from app.hub import Hub
+from app.i18n import jinja_translate, lang_of
 from app.groups import GroupStore
 from app.labels import LabelStore
 from app.routes_auth import router as auth_router
@@ -40,7 +41,12 @@ logging.basicConfig(
 )
 log = logging.getLogger("iot")
 
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+def _language(request: Request) -> dict[str, Any]:
+    return {"lang": lang_of(request)}
+
+
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR), context_processors=[_language])
+templates.env.globals["_"] = jinja_translate
 
 _static_versions: dict[str, tuple[float, str]] = {}
 

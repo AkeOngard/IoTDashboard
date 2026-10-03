@@ -16,6 +16,7 @@ from app.auth import (
     password_problem,
 )
 from app.config import settings
+from app.i18n import lang_of, translate
 
 log = logging.getLogger(__name__)
 
@@ -67,7 +68,12 @@ def _check_throttle(request: Request, key: str) -> None:
         # long rather than being left to guess.
         raise HTTPException(
             status_code=429,
-            detail="ใส่รหัสผิดหลายครั้งเกินไป ลองใหม่ในอีก %d นาที" % max(1, round(wait / 60)),
+            # The one API message a person reads as it is, so it follows
+            # the language their browser chose.
+            detail=translate(
+                lang_of(request), "ใส่รหัสผิดหลายครั้งเกินไป ลองใหม่ในอีก {n} นาที",
+                n=max(1, round(wait / 60)),
+            ),
             headers={"Retry-After": str(int(wait))},
         )
 

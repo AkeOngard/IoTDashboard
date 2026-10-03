@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="th">
+<html lang="{{ lang }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -21,6 +21,10 @@
        this page can switch the house's lights, so a third party must not be
        able to change it. See static/vendor/README.md to update them. -->
   <link rel="stylesheet" href="{{ static_url('tailwind.css') }}">
+  <!-- Thai is the text in the code; the English table is fetched only by a
+       viewer who chose English. -->
+  {% if lang == 'en' %}<script src="{{ static_url('i18n/en.js') }}"></script>{% endif %}
+  <script src="{{ static_url('i18n.js') }}"></script>
   <script src="{{ static_url('api.js') }}"></script>
   {% block head_scripts %}{% endblock %}
   <!-- Alpine is deferred, so it initialises after the page scripts above have

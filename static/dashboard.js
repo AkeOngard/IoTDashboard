@@ -23,9 +23,9 @@ function dashboard() {
     CLIMATE: ['temperature', 'humidity'],
 
     LABEL: {
-      temperature: 'อุณหภูมิ', humidity: 'ความชื้น', illuminance: 'ความสว่าง',
-      battery: 'แบตเตอรี่', contact: 'หน้าต่าง/ประตู', occupancy: 'ตรวจจับคน',
-      brightness: 'ความสว่างไฟ', color_temp: 'โทนแสง', switch: 'สวิตช์',
+      temperature: tr('อุณหภูมิ'), humidity: tr('ความชื้น'), illuminance: tr('ความสว่าง'),
+      battery: tr('แบตเตอรี่'), contact: tr('หน้าต่าง/ประตู'), occupancy: tr('ตรวจจับคน'),
+      brightness: tr('ความสว่างไฟ'), color_temp: tr('โทนแสง'), switch: tr('สวิตช์'),
     },
     UNIT: { brightness: '%', color_temp: 'K' },
     CHART_UNIT: {
@@ -57,9 +57,9 @@ function dashboard() {
     K_COOL: [198, 224, 255],
     RANGE: { brightness: [1, 100, 1], color_temp: [2200, 6500, 100] },
     RANGES: [
-      { label: '1ชม', hours: 1 }, { label: '6ชม', hours: 6 },
-      { label: '24ชม', hours: 24 }, { label: '7วัน', hours: 168 },
-      { label: '30วัน', hours: 720 },
+      { label: tr('1ชม'), hours: 1 }, { label: tr('6ชม'), hours: 6 },
+      { label: tr('24ชม'), hours: 24 }, { label: tr('7วัน'), hours: 168 },
+      { label: tr('30วัน'), hours: 720 },
     ],
     // At or below this a battery makes the alerts.
     LOW_BATTERY: 20,
@@ -194,7 +194,7 @@ function dashboard() {
         } else {
           delete this.pending[k];
           if (msg.status === 'failed') {
-            this.toast('error', 'สั่งงานไม่สำเร็จ', `${this.nameOf(msg.device_id)} — ${msg.reason || 'ไม่ทราบสาเหตุ'}`);
+            this.toast('error', tr('สั่งงานไม่สำเร็จ'), `${this.nameOf(msg.device_id)} — ${msg.reason || tr('ไม่ทราบสาเหตุ')}`);
           }
         }
       }
@@ -257,8 +257,8 @@ function dashboard() {
     },
 
     get glassLabel() {
-      if (this.glass === 0) return 'ทึบ';
-      if (this.glass === 100) return 'ใสเต็มที่';
+      if (this.glass === 0) return tr('ทึบ');
+      if (this.glass === 100) return tr('ใสเต็มที่');
       return this.glass + '%';
     },
 
@@ -275,31 +275,31 @@ function dashboard() {
     get greeting() {
       this._tick;
       const h = new Date().getHours();
-      if (h >= 5 && h < 11) return 'อรุณสวัสดิ์';
-      if (h >= 11 && h < 13) return 'สวัสดีตอนเที่ยง';
-      if (h >= 13 && h < 17) return 'สวัสดีตอนบ่าย';
-      if (h >= 17 && h < 21) return 'สวัสดีตอนเย็น';
-      if (h >= 21) return 'สวัสดีตอนค่ำ';
-      return 'สวัสดีตอนดึก';
+      if (h >= 5 && h < 11) return tr('อรุณสวัสดิ์');
+      if (h >= 11 && h < 13) return tr('สวัสดีตอนเที่ยง');
+      if (h >= 13 && h < 17) return tr('สวัสดีตอนบ่าย');
+      if (h >= 17 && h < 21) return tr('สวัสดีตอนเย็น');
+      if (h >= 21) return tr('สวัสดีตอนค่ำ');
+      return tr('สวัสดีตอนดึก');
     },
 
     /** "21:14": the big clock on the desktop overview. */
     get clockNow() {
       this._tick;
-      return new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+      return new Date().toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' });
     },
 
     /** "พฤ. 2 ต.ค.": the date beside that clock. */
     get today() {
       this._tick;
-      return new Date().toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short' });
+      return new Date().toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short' });
     },
 
     /** "ออนไลน์ 9 จาก 10 อุปกรณ์ · ในบ้าน 21.5°C": the house in one line. */
     get houseLine() {
-      const parts = [`ออนไลน์ ${this.onlineCount} จาก ${this.devices.length} อุปกรณ์`];
+      const parts = [tr('ออนไลน์ {on} จาก {n} อุปกรณ์', { on: this.onlineCount, n: this.devices.length })];
       const t = this.climate('temperature');
-      if (t) parts.push(`ในบ้าน ${t.text}°C`);
+      if (t) parts.push(tr('ในบ้าน {t}°C', { t: t.text }));
       return parts.join(' · ');
     },
 
@@ -309,10 +309,10 @@ function dashboard() {
       const times = device.capabilities.map(c => this.states[this.key(device.id, c)]?.ts).filter(Boolean);
       if (!times.length) return '—';
       const age = Date.now() / 1000 - Math.max(...times);
-      if (age < 60) return 'เมื่อสักครู่';
-      if (age < 3600) return `${Math.floor(age / 60)} นาทีที่แล้ว`;
-      if (age < 86400) return `${Math.floor(age / 3600)} ชม.ที่แล้ว`;
-      return `${Math.floor(age / 86400)} วันที่แล้ว`;
+      if (age < 60) return tr('เมื่อสักครู่');
+      if (age < 3600) return tr('{n} นาทีที่แล้ว', { n: Math.floor(age / 60) });
+      if (age < 86400) return tr('{n} ชม.ที่แล้ว', { n: Math.floor(age / 3600) });
+      return tr('{n} วันที่แล้ว', { n: Math.floor(age / 86400) });
     },
 
     // --------------------------------------------------------------- rooms
@@ -326,16 +326,16 @@ function dashboard() {
 
     /** The placeholder is an English word from the adapter, not a room. */
     roomLabel(room) {
-      return room === this.UNASSIGNED ? 'ยังไม่ระบุห้อง' : room;
+      return room === this.UNASSIGNED ? tr('ยังไม่ระบุห้อง') : room;
     },
 
     /** One status line beats three indicators: report the worst thing that is
      *  true, and stay quiet when everything is fine. */
     get health() {
-      if (!this.socket) return { tone: 'danger', text: 'ขาดการเชื่อมต่อเซิร์ฟเวอร์' };
-      if (!this.adapterConnected) return { tone: 'warn', text: `กำลังเชื่อมต่อ ${this.adapterName}` };
-      if (!this.historyEnabled) return { tone: 'muted', text: 'ทำงานปกติ · ไม่บันทึกประวัติ' };
-      return { tone: 'ok', text: 'ทำงานปกติ' };
+      if (!this.socket) return { tone: 'danger', text: tr('ขาดการเชื่อมต่อเซิร์ฟเวอร์') };
+      if (!this.adapterConnected) return { tone: 'warn', text: tr('กำลังเชื่อมต่อ {name}', { name: this.adapterName }) };
+      if (!this.historyEnabled) return { tone: 'muted', text: tr('ทำงานปกติ · ไม่บันทึกประวัติ') };
+      return { tone: 'ok', text: tr('ทำงานปกติ') };
     },
 
     // --------------------------------------------------------------- state
@@ -365,9 +365,9 @@ function dashboard() {
     format(id, cap) {
       const v = this.shown(id, cap);
       if (v === null || v === undefined) return '—';
-      if (cap === 'contact') return v ? 'ปิดสนิท' : 'เปิดอยู่';
-      if (cap === 'occupancy') return v ? 'มีคน' : 'ว่าง';
-      return typeof v === 'number' ? v.toLocaleString('th-TH') : v;
+      if (cap === 'contact') return v ? tr('ปิดสนิท') : tr('เปิดอยู่##contact');
+      if (cap === 'occupancy') return v ? tr('มีคน') : tr('ว่าง');
+      return typeof v === 'number' ? v.toLocaleString(LOCALE) : v;
     },
 
     /** A reading with its unit, short: "27.1°C", "56%", "เปิดอยู่". */
@@ -379,7 +379,7 @@ function dashboard() {
 
     /** The line under a device's name on a tile or a row. */
     summary(device) {
-      if (!device.online) return 'ออฟไลน์';
+      if (!device.online) return tr('ออฟไลน์');
       if (this.isSwitchable(device)) return this.stateText(device);
       const caps = this.heroCaps(device);
       return caps.length ? caps.map(c => this.reading(device.id, c)).join(' · ') : '—';
@@ -387,13 +387,13 @@ function dashboard() {
 
     /** The line under a switchable device's name. */
     stateText(device) {
-      if (!device.online) return 'ออฟไลน์';
-      if (this.isPending(device.id, 'switch')) return 'กำลังสั่ง…';
+      if (!device.online) return tr('ออฟไลน์');
+      if (this.isPending(device.id, 'switch')) return tr('กำลังสั่ง…');
       const v = this.shown(device.id, 'switch');
-      if (v === null || v === undefined) return 'ไม่ทราบสถานะ';
-      if (!v) return 'ปิดอยู่';
+      if (v === null || v === undefined) return tr('ไม่ทราบสถานะ');
+      if (!v) return tr('ปิดอยู่');
       const level = this.shown(device.id, 'brightness');
-      return typeof level === 'number' ? `เปิด · ${level}%` : 'เปิดอยู่';
+      return typeof level === 'number' ? tr('เปิด · {level}%', { level }) : tr('เปิดอยู่');
     },
 
     batteryText(device) {
@@ -440,7 +440,7 @@ function dashboard() {
       this._tick;
       const all = this.devices.filter(d => this.isSwitchable(d));
       const out = [];
-      if (all.length) out.push(this.describeGroup({ key: 'all', name: 'ทั้งหมด', kind: 'all', members: all }));
+      if (all.length) out.push(this.describeGroup({ key: 'all', name: tr('ทั้งหมด'), kind: 'all', members: all }));
       for (const room of this.rooms) {
         const members = all.filter(d => d.room === room);
         if (members.length) {
@@ -466,11 +466,11 @@ function dashboard() {
     describeGroup(g) {
       const live = g.members.filter(d => d.online);
       const on = live.filter(d => this.isOn(d)).length;
-      const sub = !g.members.length ? 'ไม่มีอุปกรณ์ที่เปิดปิดได้'
-        : !live.length ? 'ออฟไลน์ทั้งหมด'
-        : on === 0 ? 'ปิดทั้งหมด'
-        : on === live.length ? 'เปิดทั้งหมด'
-        : `เปิด ${on} จาก ${live.length}`;
+      const sub = !g.members.length ? tr('ไม่มีอุปกรณ์ที่เปิดปิดได้')
+        : !live.length ? tr('ออฟไลน์ทั้งหมด')
+        : on === 0 ? tr('ปิดทั้งหมด')
+        : on === live.length ? tr('เปิดทั้งหมด')
+        : tr('เปิด {on} จาก {n}', { on, n: live.length });
       return { ...g, live, on, sub };
     },
 
@@ -489,7 +489,7 @@ function dashboard() {
           await apiFetch('/api/devices/switch', { json: { devices: group.members.map(d => d.id), value } });
         }
       } catch (err) {
-        this.toast('error', 'สั่งทั้งกลุ่มไม่ได้', err.message);
+        this.toast('error', tr('สั่งทั้งกลุ่มไม่ได้'), err.message);
       }
     },
 
@@ -521,7 +521,7 @@ function dashboard() {
     async saveGroup() {
       const edit = this.groupEdit;
       const name = edit.name.trim();
-      if (!name) { edit.error = 'ตั้งชื่อกลุ่มก่อน'; return; }
+      if (!name) { edit.error = tr('ตั้งชื่อกลุ่มก่อน'); return; }
       edit.busy = true; edit.error = '';
       try {
         const body = { name, devices: edit.devices };
@@ -541,7 +541,7 @@ function dashboard() {
 
     async deleteGroup() {
       const edit = this.groupEdit;
-      if (!edit.id || !window.confirm(`ลบกลุ่ม "${edit.name}"? อุปกรณ์ในกลุ่มไม่ได้หายไปไหน`)) return;
+      if (!edit.id || !window.confirm(tr('ลบกลุ่ม "{name}"? อุปกรณ์ในกลุ่มไม่ได้หายไปไหน', { name: edit.name }))) return;
       edit.busy = true;
       try {
         await apiFetch(`/api/groups/${encodeURIComponent(edit.id)}`, { method: 'DELETE' });
@@ -587,22 +587,22 @@ function dashboard() {
         const base = { id: d.id, name: d.name, room: this.roomLabel(d.room) };
         if (!d.online) {
           out.push({ ...base, ...danger, key: d.id + ':offline', kind: 'offline',
-                     title: `${d.name} ออฟไลน์`, detail: 'ไม่ตอบสนองจากเครือข่าย' });
+                     title: tr('{name} ออฟไลน์', { name: d.name }), detail: tr('ไม่ตอบสนองจากเครือข่าย') });
           continue;
         }
         if (d.capabilities.includes('contact') && this.value(d.id, 'contact') === false) {
           out.push({ ...base, ...warn, key: d.id + ':open', kind: 'open',
-                     title: `${d.name} เปิดอยู่`, detail: 'หน้าต่างหรือประตูยังเปิด' });
+                     title: tr('{name} เปิดอยู่##contact', { name: d.name }), detail: tr('หน้าต่างหรือประตูยังเปิด') });
         }
         const battery = this.value(d.id, 'battery');
         if (typeof battery === 'number' && battery <= this.LOW_BATTERY) {
           out.push({ ...base, ...warn, key: d.id + ':battery', kind: 'battery',
-                     title: `แบต ${d.name} เหลือ ${battery}%`, detail: 'ควรเปลี่ยนแบตเตอรี่เร็ว ๆ นี้' });
+                     title: tr('แบต {name} เหลือ {n}%', { name: d.name, n: battery }), detail: tr('ควรเปลี่ยนแบตเตอรี่เร็ว ๆ นี้') });
         }
         const stale = this.staleness(d);
         if (stale && stale.color === 'var(--warn)') {
           out.push({ ...base, ...warn, key: d.id + ':stale', kind: 'stale',
-                     title: `${d.name} ${stale.text}`, detail: 'ไม่ได้ส่งค่ามาสักพัก' });
+                     title: `${d.name} ${stale.text}`, detail: tr('ไม่ได้ส่งค่ามาสักพัก') });
         }
       }
       return out;
@@ -612,9 +612,9 @@ function dashboard() {
 
     /** Online / attention / offline, as a label and a pill style. */
     status(device) {
-      if (!device.online) return { text: 'ออฟไลน์', cls: 'pill-muted' };
-      if (this.hasIssue(device)) return { text: 'ต้องดูแล', cls: 'pill-warn' };
-      return { text: 'ออนไลน์', cls: 'pill-ok' };
+      if (!device.online) return { text: tr('ออฟไลน์'), cls: 'pill-muted' };
+      if (this.hasIssue(device)) return { text: tr('ต้องดูแล'), cls: 'pill-warn' };
+      return { text: tr('ออนไลน์'), cls: 'pill-ok' };
     },
 
     // ------------------------------------------------------------ devices
@@ -749,14 +749,14 @@ function dashboard() {
       if (!sensing.length) return null;
 
       const times = sensing.map(c => this.states[this.key(device.id, c)]?.ts).filter(Boolean);
-      if (!times.length) return { key: '_stale', text: 'ยังไม่มีข้อมูล', color: 'var(--faint)' };
+      if (!times.length) return { key: '_stale', text: tr('ยังไม่มีข้อมูล'), color: 'var(--faint)' };
 
       const age = Date.now() / 1000 - Math.max(...times);
       if (age < this.STALE_SECONDS) return null;   // fresh: say nothing
       const minutes = Math.floor(age / 60);
       const text = minutes < 90
-        ? `เงียบมา ${minutes} นาที`
-        : `เงียบมา ${Math.floor(age / 3600)} ชั่วโมง`;
+        ? tr('เงียบมา {n} นาที', { n: minutes })
+        : tr('เงียบมา {n} ชั่วโมง', { n: Math.floor(age / 3600) });
       return { key: '_stale', text, color: 'var(--warn)' };
     },
 
@@ -782,7 +782,7 @@ function dashboard() {
           { json: { capability: cap, value } });
       } catch (err) {
         delete this.pending[this.key(id, cap)];
-        this.toast('error', 'ส่งคำสั่งไม่ได้', err.message);
+        this.toast('error', tr('ส่งคำสั่งไม่ได้'), err.message);
       }
     },
 
@@ -823,7 +823,7 @@ function dashboard() {
           { method: 'PATCH', json: body });
         this.editing = null;
       } catch (err) {
-        this.toast('error', 'บันทึกชื่อไม่สำเร็จ', err.message);
+        this.toast('error', tr('บันทึกชื่อไม่สำเร็จ'), err.message);
       } finally {
         this.saving = false;
       }
@@ -838,7 +838,7 @@ function dashboard() {
           { method: 'PATCH', json: { name: '' } });
         this.editing = null;
       } catch (err) {
-        this.toast('error', 'บันทึกชื่อไม่สำเร็จ', err.message);
+        this.toast('error', tr('บันทึกชื่อไม่สำเร็จ'), err.message);
       } finally {
         this.saving = false;
       }
@@ -848,18 +848,18 @@ function dashboard() {
 
     // Weekday chips, Monday first; values match Python's weekday().
     WEEKDAYS: [
-      { d: 0, label: 'จ' }, { d: 1, label: 'อ' }, { d: 2, label: 'พ' }, { d: 3, label: 'พฤ' },
-      { d: 4, label: 'ศ' }, { d: 5, label: 'ส' }, { d: 6, label: 'อา' },
+      { d: 0, label: tr('จ') }, { d: 1, label: tr('อ') }, { d: 2, label: tr('พ') }, { d: 3, label: tr('พฤ') },
+      { d: 4, label: tr('ศ') }, { d: 5, label: tr('ส') }, { d: 6, label: tr('อา') },
     ],
     // On/off readings and what each side is called.
     BINARY: {
-      switch: { true: 'เปิด', false: 'ปิด' },
-      contact: { true: 'ปิดสนิท', false: 'เปิดอยู่' },
-      occupancy: { true: 'มีคน', false: 'ว่าง' },
+      switch: { true: tr('เปิด##state'), false: tr('ปิด##state') },
+      contact: { true: tr('ปิดสนิท'), false: tr('เปิดอยู่##contact') },
+      occupancy: { true: tr('มีคน'), false: tr('ว่าง') },
     },
     // A sensible first value when a number capability is picked.
     NUMBER_DEFAULT: { temperature: 30, humidity: 70, illuminance: 100, battery: 20, brightness: 100, color_temp: 3000 },
-    OP_LABEL: { gt: 'มากกว่า', lt: 'น้อยกว่า', eq: 'เท่ากับ', ne: 'ไม่เท่ากับ' },
+    OP_LABEL: { gt: tr('มากกว่า'), lt: tr('น้อยกว่า'), eq: tr('เท่ากับ'), ne: tr('ไม่เท่ากับ') },
 
     isBinary(cap) { return cap in this.BINARY; },
 
@@ -885,14 +885,14 @@ function dashboard() {
 
     /** Everything an action can switch as a group. */
     get groupTargets() {
-      return [{ value: 'all', label: 'ทั้งบ้าน' }]
-        .concat(this.rooms.map(r => ({ value: 'room:' + r, label: 'ห้อง ' + this.roomLabel(r) })))
-        .concat(this.customGroups.map(g => ({ value: g.id, label: 'กลุ่ม ' + g.name })));
+      return [{ value: 'all', label: tr('ทั้งบ้าน') }]
+        .concat(this.rooms.map(r => ({ value: 'room:' + r, label: tr('ห้อง ') + this.roomLabel(r) })))
+        .concat(this.customGroups.map(g => ({ value: g.id, label: tr('กลุ่ม ') + g.name })));
     },
 
     targetLabel(target) {
       const t = this.groupTargets.find(x => x.value === target);
-      return t ? t.label : 'กลุ่มที่ถูกลบไปแล้ว';
+      return t ? t.label : tr('กลุ่มที่ถูกลบไปแล้ว');
     },
 
     deviceById(id) { return this.devices.find(d => d.id === id) || null; },
@@ -998,51 +998,53 @@ function dashboard() {
     // ----- words
 
     daysText(days) {
-      if (!days || !days.length || days.length === 7) return 'ทุกวัน';
-      if (days.join() === '0,1,2,3,4') return 'วันธรรมดา';
-      if (days.join() === '5,6') return 'เสาร์-อาทิตย์';
+      if (!days || !days.length || days.length === 7) return tr('ทุกวัน');
+      if (days.join() === '0,1,2,3,4') return tr('วันธรรมดา');
+      if (days.join() === '5,6') return tr('เสาร์-อาทิตย์');
       return days.map(d => this.WEEKDAYS[d].label).join(' ');
     },
 
     /** "หน้าต่างครัว เปิดอยู่", "เซนเซอร์ อุณหภูมิ มากกว่า 30°C". */
     testText(t) {
       const d = this.deviceById(t.device);
-      const name = d ? d.name : 'อุปกรณ์ที่หายไป';
+      const name = d ? d.name : tr('อุปกรณ์ที่หายไป');
       if (this.isBinary(t.capability)) {
         const word = this.BINARY[t.capability][String(t.value)];
-        return `${name} ${t.op === 'ne' ? 'ไม่' : ''}${word}`;
+        return t.op === 'ne' ? tr('{name} ไม่{word}', { name, word }) : tr('{name} {word}##is', { name, word });
       }
       return `${name} ${this.LABEL[t.capability] || t.capability} ${this.OP_LABEL[t.op]} ${t.value}${this.CHART_UNIT[t.capability] || ''}`;
     },
 
     actionText(a) {
-      if (a.type === 'delay') return `รอ ${Math.round(a.seconds / 60) || 1} นาที`;
-      if (a.type === 'group') return `${a.value ? 'เปิด' : 'ปิด'}${this.targetLabel(a.group)}`;
+      if (a.type === 'delay') return tr('รอ {n} นาที', { n: Math.round(a.seconds / 60) || 1 });
+      if (a.type === 'group') return tr(a.value ? 'เปิด{target}' : 'ปิด{target}', { target: this.targetLabel(a.group) });
       const d = this.deviceById(a.device);
-      const name = d ? d.name : 'อุปกรณ์ที่หายไป';
-      if (a.capability === 'switch') return `${a.value ? 'เปิด' : 'ปิด'} ${name}`;
-      return `ตั้ง${this.LABEL[a.capability]} ${name} เป็น ${a.value}${this.UNIT[a.capability] || ''}`;
+      const name = d ? d.name : tr('อุปกรณ์ที่หายไป');
+      if (a.capability === 'switch') return tr(a.value ? 'เปิด {name}' : 'ปิด {name}', { name });
+      return tr('ตั้ง{what} {name} เป็น {value}',
+        { what: this.LABEL[a.capability], name, value: a.value + (this.UNIT[a.capability] || '') });
     },
 
     /** The whole rule in one sentence. */
     ruleText(rule) {
       const t = rule.trigger;
-      const when = t.type === 'time' ? `เวลา ${t.at} ${this.daysText(t.days)}` : `เมื่อ ${this.testText(t)}`;
-      const ifs = rule.conditions.map(c => c.type === 'time_between' ? `ช่วง ${c.from}–${c.to}`
-        : c.type === 'weekday' ? `เป็น${this.daysText(c.days)}` : this.testText(c));
+      const when = t.type === 'time' ? tr('เวลา {at} {days}', { at: t.at, days: this.daysText(t.days) })
+        : tr('เมื่อ {test}', { test: this.testText(t) });
+      const ifs = rule.conditions.map(c => c.type === 'time_between' ? tr('ช่วง {from}–{to}', { from: c.from, to: c.to })
+        : c.type === 'weekday' ? tr('เป็น{days}', { days: this.daysText(c.days) }) : this.testText(c));
       const thens = rule.actions.map(a => this.actionText(a));
-      return when + (ifs.length ? ' และถ้า ' + ifs.join(', ') : '') + ' → ' + (thens.join(' → ') || '…');
+      return when + (ifs.length ? tr(' และถ้า ') + ifs.join(', ') : '') + ' → ' + (thens.join(' → ') || '…');
     },
 
     runText(entry) {
-      const why = { time: 'ตามเวลา', device: 'อุปกรณ์เปลี่ยน', test: 'ลองสั่ง' }[entry.why] || entry.why;
-      const skipped = { time_between: 'นอกช่วงเวลา', weekday: 'ไม่ใช่วันที่กำหนด', device: 'สถานะอุปกรณ์ไม่ตรง' };
+      const why = { time: tr('ตามเวลา'), device: tr('อุปกรณ์เปลี่ยน'), test: tr('ลองสั่ง') }[entry.why] || entry.why;
+      const skipped = { time_between: tr('นอกช่วงเวลา'), weekday: tr('ไม่ใช่วันที่กำหนด'), device: tr('สถานะอุปกรณ์ไม่ตรง') };
       const result = {
-        ran: 'ทำงานแล้ว',
-        skipped: 'ข้าม — ' + (skipped[entry.detail] || 'เงื่อนไขไม่ตรง'),
-        failed: 'ไม่สำเร็จ — ' + entry.detail,
-        limited: 'หยุดไว้ — ทำงานถี่เกินไป อาจวนกับกฎอื่น',
-        cancelled: 'ยกเลิก — กฎถูกแก้ระหว่างรอ',
+        ran: tr('ทำงานแล้ว'),
+        skipped: tr('ข้าม — ') + (skipped[entry.detail] || tr('เงื่อนไขไม่ตรง')),
+        failed: tr('ไม่สำเร็จ — ') + entry.detail,
+        limited: tr('หยุดไว้ — ทำงานถี่เกินไป อาจวนกับกฎอื่น'),
+        cancelled: tr('ยกเลิก — กฎถูกแก้ระหว่างรอ'),
       }[entry.result] || entry.result;
       return `${why} · ${result}`;
     },
@@ -1052,14 +1054,14 @@ function dashboard() {
     },
 
     clock(ts) {
-      return new Date(ts * 1000).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+      return new Date(ts * 1000).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' });
     },
 
     // ----- saving
 
     async saveRule() {
       const edit = this.ruleEdit;
-      if (!edit.draft.name.trim()) { edit.error = 'ตั้งชื่อกฎก่อน'; return; }
+      if (!edit.draft.name.trim()) { edit.error = tr('ตั้งชื่อกฎก่อน'); return; }
       edit.busy = true; edit.error = '';
       try {
         const body = { ...edit.draft, name: edit.draft.name.trim() };
@@ -1068,7 +1070,7 @@ function dashboard() {
           : await apiFetch('/api/automations', { json: body });
         // Stay on the rule, now saved: the list itself arrives over the socket.
         this.openEditor(saved.id, saved);
-        this.toast('ok', 'บันทึกกฎแล้ว', saved.name);
+        this.toast('ok', tr('บันทึกกฎแล้ว'), saved.name);
       } catch (err) {
         edit.error = err.message;
       } finally {
@@ -1081,7 +1083,7 @@ function dashboard() {
         await apiFetch(`/api/automations/${encodeURIComponent(rule.id)}`, { method: 'PATCH', json: { enabled } });
         if (this.ruleEdit.id === rule.id && this.ruleEdit.draft) this.ruleEdit.draft.enabled = enabled;
       } catch (err) {
-        this.toast('error', 'เปลี่ยนสถานะกฎไม่ได้', err.message);
+        this.toast('error', tr('เปลี่ยนสถานะกฎไม่ได้'), err.message);
       }
     },
 
@@ -1091,16 +1093,16 @@ function dashboard() {
         // The log entry only lands when the run ends, which a "wait" can
         // put minutes away: say now that it started.
         const waits = this.ruleEdit.draft.actions.some(a => a.type === 'delay');
-        this.toast('ok', 'เริ่มทำตามกฎแล้ว',
-                   waits ? 'กฎนี้มีขั้นรอ ผลจะขึ้นในบันทึกเมื่อทำครบ' : 'ผลจะขึ้นในบันทึกในอีกครู่');
+        this.toast('ok', tr('เริ่มทำตามกฎแล้ว'),
+                   waits ? tr('กฎนี้มีขั้นรอ ผลจะขึ้นในบันทึกเมื่อทำครบ') : tr('ผลจะขึ้นในบันทึกในอีกครู่'));
       } catch (err) {
-        this.toast('error', 'ลองสั่งไม่ได้', err.message);
+        this.toast('error', tr('ลองสั่งไม่ได้'), err.message);
       }
     },
 
     async deleteRule() {
       const edit = this.ruleEdit;
-      if (!edit.id || !window.confirm(`ลบกฎ "${edit.draft.name}"?`)) return;
+      if (!edit.id || !window.confirm(tr('ลบกฎ "{name}"?', { name: edit.draft.name }))) return;
       edit.busy = true;
       try {
         await apiFetch(`/api/automations/${encodeURIComponent(edit.id)}`, { method: 'DELETE' });
@@ -1124,7 +1126,7 @@ function dashboard() {
 
     /** End every session, this one too, keeping the password. */
     async logoutAll() {
-      if (!window.confirm('ให้ทุกเครื่องออกจากระบบ รวมเครื่องนี้ด้วย?')) return;
+      if (!window.confirm(tr('ให้ทุกเครื่องออกจากระบบ รวมเครื่องนี้ด้วย?'))) return;
       await this._endSession('/api/auth/logout-all');
     },
 
@@ -1143,8 +1145,8 @@ function dashboard() {
         if (err.status !== 401) {
           this.loggingOut = false;
           this.connect();
-          this.toast('error', 'ยังไม่ได้ออกจากระบบ',
-                     'ติดต่อเซิร์ฟเวอร์ไม่ได้ การเข้าสู่ระบบบนเครื่องนี้ยังใช้ได้อยู่ ลองใหม่อีกครั้ง');
+          this.toast('error', tr('ยังไม่ได้ออกจากระบบ'),
+                     tr('ติดต่อเซิร์ฟเวอร์ไม่ได้ การเข้าสู่ระบบบนเครื่องนี้ยังใช้ได้อยู่ ลองใหม่อีกครั้ง'));
           return;
         }
       }
@@ -1170,11 +1172,11 @@ function dashboard() {
           return;
         }
         this.account.error =
-            detail === 'current password is wrong' ? 'รหัสผ่านปัจจุบันไม่ถูกต้อง'
-          : detail.startsWith('password must be at least') ? 'รหัสผ่านใหม่ต้องมีอย่างน้อย 10 ตัวอักษร'
-          : detail.startsWith('password must not start or end') ? 'รหัสผ่านใหม่ต้องไม่ขึ้นต้นหรือลงท้ายด้วยช่องว่าง'
-          : err.status === 0 ? 'ติดต่อเซิร์ฟเวอร์ไม่ได้'
-          : detail || 'เปลี่ยนรหัสผ่านไม่สำเร็จ';
+            detail === 'current password is wrong' ? tr('รหัสผ่านปัจจุบันไม่ถูกต้อง')
+          : detail.startsWith('password must be at least') ? tr('รหัสผ่านใหม่ต้องมีอย่างน้อย 10 ตัวอักษร')
+          : detail.startsWith('password must not start or end') ? tr('รหัสผ่านใหม่ต้องไม่ขึ้นต้นหรือลงท้ายด้วยช่องว่าง')
+          : err.status === 0 ? tr('ติดต่อเซิร์ฟเวอร์ไม่ได้')
+          : detail || tr('เปลี่ยนรหัสผ่านไม่สำเร็จ');
       } finally {
         this.account.busy = false;
       }
@@ -1185,7 +1187,7 @@ function dashboard() {
       try {
         await apiFetch('/api/devices/refresh', { method: 'POST' });
       } catch (err) {
-        this.toast('error', 'สแกนไม่สำเร็จ', err.message);
+        this.toast('error', tr('สแกนไม่สำเร็จ'), err.message);
       } finally {
         this.refreshing = false;
       }
@@ -1357,7 +1359,7 @@ function dashboard() {
         key: frac,
         left: L + frac * (R - L),
         align: frac === 0 ? 'start' : frac === 1 ? 'end' : 'center',
-        text: frac === 1 ? 'ตอนนี้' : this.stamp(start + frac * (end - start), data.hours),
+        text: frac === 1 ? tr('ตอนนี้') : this.stamp(start + frac * (end - start), data.hours),
       }));
 
       this.chart.geo = {
@@ -1377,7 +1379,7 @@ function dashboard() {
       const px = (event.clientX - rect.left) * (g.w / rect.width);
       let best = g.pts[0];
       for (const p of g.pts) if (Math.abs(p.x - px) < Math.abs(best.x - px)) best = p;
-      const when = new Date(best.t * 1000).toLocaleString('th-TH', {
+      const when = new Date(best.t * 1000).toLocaleString(LOCALE, {
         day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
       });
       this.chart.hover = {
@@ -1390,8 +1392,8 @@ function dashboard() {
 
     stamp(epoch, hours) {
       const d = new Date(epoch * 1000);
-      if (hours <= 24) return d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-      return d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+      if (hours <= 24) return d.toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' });
+      return d.toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' });
     },
 
     get chartStats() {
@@ -1410,9 +1412,9 @@ function dashboard() {
           : 'var(--text)',
       });
       return [
-        item('ต่ำสุด', Math.min(...data.points.map(p => p.lo ?? p.v).filter(v => v !== null))),
-        item('เฉลี่ย', values.reduce((a, b) => a + b, 0) / values.length),
-        item('สูงสุด', Math.max(...data.points.map(p => p.hi ?? p.v).filter(v => v !== null))),
+        item(tr('ต่ำสุด'), Math.min(...data.points.map(p => p.lo ?? p.v).filter(v => v !== null))),
+        item(tr('เฉลี่ย'), values.reduce((a, b) => a + b, 0) / values.length),
+        item(tr('สูงสุด'), Math.max(...data.points.map(p => p.hi ?? p.v).filter(v => v !== null))),
       ];
     },
 
@@ -1420,9 +1422,9 @@ function dashboard() {
       const data = this.chart.data;
       if (!data) return '';
       const bucket = data.bucket_seconds >= 3600
-        ? `${Math.round(data.bucket_seconds / 3600)} ชม.`
-        : `${Math.round(data.bucket_seconds / 60) || 1} นาที`;
-      return `${data.points.length} จุด · ช่วงละ ${bucket}`;
+        ? tr('{n} ชม.', { n: Math.round(data.bucket_seconds / 3600) })
+        : tr('{n} นาที', { n: Math.round(data.bucket_seconds / 60) || 1 });
+      return tr('{n} จุด · ช่วงละ {bucket}', { n: data.points.length, bucket });
     },
 
     toast(kind, title, body) {

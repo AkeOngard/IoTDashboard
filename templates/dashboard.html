@@ -16,7 +16,7 @@
     <template x-if="isSwitchable({{ d }})">
       <button class="toggle z-10" :class="isPending({{ d }}.id, 'switch') && 'is-pending'"
               :aria-pressed="isOn({{ d }}) ? 'true' : 'false'"
-              :aria-label="(isOn({{ d }}) ? 'ปิด ' : 'เปิด ') + {{ d }}.name"
+              :aria-label="(isOn({{ d }}) ? tr('ปิด ') : tr('เปิด ')) + {{ d }}.name"
               :disabled="!{{ d }}.online" @click="toggle({{ d }})"></button>
     </template>
   </div>
@@ -43,7 +43,7 @@
     </div>
     <template x-if="{{ g }}.kind === 'custom'">
       <button class="-mr-1 -mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] text-[var(--faint)] hover:bg-[var(--tile-hover)] hover:text-[var(--text)]"
-              @click="editGroup({{ g }})" :aria-label="'แก้กลุ่ม ' + {{ g }}.name">
+              @click="editGroup({{ g }})" :aria-label="tr('แก้กลุ่ม ') + {{ g }}.name">
         <span class="ic h-[18px] w-[18px]" x-html="icon('pencil')"></span>
       </button>
     </template>
@@ -58,21 +58,21 @@
       </a>
     </template>
     <span x-show="{{ g }}.kind === 'custom' && !{{ g }}.devices.length" class="text-[13px] text-[var(--faint)]">
-      ยังไม่มีอุปกรณ์ — กดดินสอเพื่อเพิ่ม
+      {{ _('ยังไม่มีอุปกรณ์ — กดดินสอเพื่อเพิ่ม') }}
     </span>
   </div>
   <div class="flex gap-2">
     <button class="btn btn-ghost !h-10 flex-1" @click="switchGroup({{ g }}, true)"
-            :disabled="!{{ g }}.live.length || {{ g }}.on === {{ g }}.live.length">เปิดทั้งหมด</button>
+            :disabled="!{{ g }}.live.length || {{ g }}.on === {{ g }}.live.length">{{ _('เปิดทั้งหมด##action') }}</button>
     <button class="btn btn-ghost !h-10 flex-1" @click="switchGroup({{ g }}, false)"
-            :disabled="!{{ g }}.on">ปิดทั้งหมด</button>
+            :disabled="!{{ g }}.on">{{ _('ปิดทั้งหมด##action') }}</button>
   </div>
 </div>
 {%- endmacro %}
 
 {% macro day_chips(days) -%}
 {#- Weekday toggles over a list of weekday numbers; none chosen = every day. -#}
-<div class="flex flex-wrap gap-1.5" role="group" aria-label="วัน">
+<div class="flex flex-wrap gap-1.5" role="group" aria-label="{{ _('วัน') }}">
   <template x-for="w in WEEKDAYS" :key="w.d">
     <button type="button" @click="toggleDay({{ days }}, w.d)" x-text="w.label"
             :aria-pressed="({{ days }} || []).includes(w.d) ? 'true' : 'false'"
@@ -85,12 +85,12 @@
 {% macro test_fields(t) -%}
 {#- A device test: which device, which reading, and what it should be. -#}
 <div class="flex flex-wrap items-center gap-2">
-  <select class="field !h-10 min-w-[150px] flex-1 !text-[15px]" x-model="{{ t }}.device" @change="fixTest({{ t }})" aria-label="อุปกรณ์">
+  <select class="field !h-10 min-w-[150px] flex-1 !text-[15px]" x-model="{{ t }}.device" @change="fixTest({{ t }})" aria-label="{{ _('อุปกรณ์##one') }}">
     <template x-for="d in devices" :key="d.id">
       <option :value="d.id" :selected="d.id === {{ t }}.device" x-text="roomLabel(d.room) + ' · ' + d.name"></option>
     </template>
   </select>
-  <select class="field !h-10 !w-auto !text-[15px]" x-model="{{ t }}.capability" @change="fixTest({{ t }})" aria-label="ค่าที่ดู"
+  <select class="field !h-10 !w-auto !text-[15px]" x-model="{{ t }}.capability" @change="fixTest({{ t }})" aria-label="{{ _('ค่าที่ดู') }}"
           x-show="capsFor({{ t }}.device, false).length > 1">
     <template x-for="cap in capsFor({{ t }}.device, false)" :key="cap">
       <option :value="cap" :selected="cap === {{ t }}.capability" x-text="LABEL[cap] || cap"></option>
@@ -99,17 +99,17 @@
   <template x-if="isBinary({{ t }}.capability)">
     <div class="seg">
       <button type="button" @click="{{ t }}.value = true" :aria-pressed="{{ t }}.value === true ? 'true' : 'false'"
-              x-text="(BINARY[{{ t }}.capability] || {}).true"></button>
+              class="capitalize" x-text="(BINARY[{{ t }}.capability] || {}).true"></button>
       <button type="button" @click="{{ t }}.value = false" :aria-pressed="{{ t }}.value === false ? 'true' : 'false'"
-              x-text="(BINARY[{{ t }}.capability] || {}).false"></button>
+              class="capitalize" x-text="(BINARY[{{ t }}.capability] || {}).false"></button>
     </div>
   </template>
   <template x-if="!isBinary({{ t }}.capability)">
     <div class="flex items-center gap-2">
-      <select class="field !h-10 !w-auto !text-[15px]" x-model="{{ t }}.op" aria-label="เปรียบเทียบ">
-        <option value="gt">มากกว่า</option><option value="lt">น้อยกว่า</option>
+      <select class="field !h-10 !w-auto !text-[15px]" x-model="{{ t }}.op" aria-label="{{ _('เปรียบเทียบ') }}">
+        <option value="gt">{{ _('มากกว่า') }}</option><option value="lt">{{ _('น้อยกว่า') }}</option>
       </select>
-      <input type="number" step="any" class="field !h-10 !w-24 !text-[15px]" x-model.number="{{ t }}.value" aria-label="ค่า">
+      <input type="number" step="any" class="field !h-10 !w-24 !text-[15px]" x-model.number="{{ t }}.value" aria-label="{{ _('ค่า') }}">
       <span class="text-[14px] text-[var(--faint)]" x-text="CHART_UNIT[{{ t }}.capability] || ''"></span>
     </div>
   </template>
@@ -119,14 +119,14 @@
 {% macro chart_block() -%}
 <div>
   <div class="flex flex-wrap items-center gap-2.5">
-    <div class="seg no-scrollbar max-w-full overflow-x-auto" role="group" aria-label="ค่าที่แสดง"
+    <div class="seg no-scrollbar max-w-full overflow-x-auto" role="group" aria-label="{{ _('ค่าที่แสดง') }}"
          x-show="chartCaps(chart.device).length > 1">
       <template x-for="cap in chartCaps(chart.device)" :key="cap">
         <button @click="pickCapability(cap)" :aria-pressed="chart.capability === cap ? 'true' : 'false'"
                 x-text="LABEL[cap] || cap"></button>
       </template>
     </div>
-    <div class="seg no-scrollbar max-w-full overflow-x-auto sm:ml-auto" role="group" aria-label="ช่วงเวลา">
+    <div class="seg no-scrollbar max-w-full overflow-x-auto sm:ml-auto" role="group" aria-label="{{ _('ช่วงเวลา') }}">
       <template x-for="r in RANGES" :key="r.hours">
         <button class="!px-2.5 tabular-nums" @click="pickRange(r.hours)"
                 :aria-pressed="chart.hours === r.hours ? 'true' : 'false'" x-text="r.label"></button>
@@ -139,7 +139,7 @@
     <template x-if="chart.drawn">
       <div class="absolute inset-0">
         <svg :width="chart.geo.w" :height="chart.geo.h" :viewBox="'0 0 ' + chart.geo.w + ' ' + chart.geo.h"
-             class="block" role="img" :aria-label="'กราฟ' + (LABEL[chart.capability] || chart.capability) + 'ย้อนหลัง'">
+             class="block" role="img" :aria-label="tr('กราฟ{what}ย้อนหลัง', { what: LABEL[chart.capability] || chart.capability })">
           <path :d="chart.geo.grid" stroke="var(--line)" fill="none"/>
           <path :d="chart.geo.band" :fill="chart.geo.fill"/>
           <path :d="chart.geo.line" fill="none" :stroke="chart.geo.stroke" stroke-width="2"
@@ -169,11 +169,11 @@
       </div>
     </template>
     <template x-if="chart.loading && !chart.drawn">
-      <div class="absolute inset-0 flex items-center justify-center text-[14px] text-[var(--faint)]">กำลังโหลด…</div>
+      <div class="absolute inset-0 flex items-center justify-center text-[14px] text-[var(--faint)]">{{ _('กำลังโหลด…') }}</div>
     </template>
     <template x-if="!chart.loading && !chart.error && chart.data && chart.data.points.length === 0">
       <div class="absolute inset-0 flex items-center justify-center text-[14px] text-[var(--faint)]">
-        ยังไม่มีข้อมูลในช่วงเวลานี้
+        {{ _('ยังไม่มีข้อมูลในช่วงเวลานี้') }}
       </div>
     </template>
     <template x-if="chart.error">
@@ -192,7 +192,7 @@
     <div class="flex flex-col gap-1.5 sm:ml-auto sm:items-end">
       <p class="flex items-center gap-2 text-[13px] text-[var(--muted)]" x-show="chart.drawn && chart.geo.band">
         <span class="h-2.5 w-[18px] rounded-[3px]" :style="'background: ' + chart.geo.fill"></span>
-        ช่วงที่ค่าแกว่ง (ต่ำสุด–สูงสุดในช่วงนั้น)
+        {{ _('ช่วงที่ค่าแกว่ง (ต่ำสุด–สูงสุดในช่วงนั้น)') }}
       </p>
       <p class="text-[13px] text-[var(--faint)]" x-text="chartSource"></p>
     </div>
@@ -206,26 +206,26 @@
 <div x-data="dashboard()" x-cloak class="min-h-screen">
 
   <!-- ── sidebar (tablet and up) ──────────────────────────────────────── -->
-  <aside class="pane fixed bottom-3 left-3 top-3 z-20 hidden w-[232px] flex-col p-3 md:flex" aria-label="เมนู">
+  <aside class="pane fixed bottom-3 left-3 top-3 z-20 hidden w-[232px] flex-col p-3 md:flex" aria-label="{{ _('เมนู') }}">
     <a href="#/" class="mb-4 flex items-center gap-2.5 rounded-xl px-2 py-1.5">
       <span class="ic h-7 w-7 text-[var(--accent-text)]" x-html="icon('home')"></span>
       <span class="text-[17px] font-semibold tracking-tight">IoT Gateway</span>
     </a>
-    <nav class="flex flex-col gap-1" aria-label="เมนูหลัก">
+    <nav class="flex flex-col gap-1" aria-label="{{ _('เมนูหลัก') }}">
       <a href="#/" class="nav-link" :aria-current="page === 'overview' ? 'page' : null">
-        <span class="ic h-5 w-5" x-html="icon('overview')"></span>ภาพรวม
+        <span class="ic h-5 w-5" x-html="icon('overview')"></span>{{ _('ภาพรวม') }}
       </a>
       <a href="#/devices" class="nav-link" :aria-current="page === 'devices' || page === 'device' ? 'page' : null">
-        <span class="ic h-5 w-5" x-html="icon('devices')"></span>อุปกรณ์
+        <span class="ic h-5 w-5" x-html="icon('devices')"></span>{{ _('อุปกรณ์') }}
       </a>
       <a href="#/groups" class="nav-link" :aria-current="page === 'groups' ? 'page' : null">
-        <span class="ic h-5 w-5" x-html="icon('group')"></span>กลุ่ม
+        <span class="ic h-5 w-5" x-html="icon('group')"></span>{{ _('กลุ่ม') }}
       </a>
       <a href="#/automations" class="nav-link" :aria-current="page === 'automations' ? 'page' : null">
-        <span class="ic h-5 w-5" x-html="icon('flow')"></span>อัตโนมัติ
+        <span class="ic h-5 w-5" x-html="icon('flow')"></span>{{ _('อัตโนมัติ') }}
       </a>
       <a href="#/alerts" class="nav-link" :aria-current="page === 'alerts' ? 'page' : null">
-        <span class="ic h-5 w-5" x-html="icon('bell')"></span>แจ้งเตือน
+        <span class="ic h-5 w-5" x-html="icon('bell')"></span>{{ _('แจ้งเตือน') }}
         <span x-show="issues.length" x-text="issues.length"
               class="ml-auto min-w-[22px] rounded-full bg-[var(--accent)] px-1.5 text-center text-[12px] font-semibold leading-[22px] text-[var(--accent-ink)]"></span>
       </a>
@@ -238,18 +238,18 @@
               :class="{ ok: 'bg-[var(--ok)]', warn: 'bg-[var(--warn)] is-pending', danger: 'bg-[var(--danger)] is-pending', muted: 'bg-[var(--faint)]' }[health.tone]"></span>
         <div class="min-w-0 leading-tight">
           <p class="truncate text-[13px] font-medium" x-text="health.text"></p>
-          <p class="truncate text-[12px] text-[var(--faint)]" x-text="'ตัวเชื่อม: ' + adapterName"></p>
+          <p class="truncate text-[12px] text-[var(--faint)]" x-text="tr('ตัวเชื่อม: ') + adapterName"></p>
         </div>
       </div>
       <button class="nav-link" @click="setTheme(theme === 'dark' ? 'light' : 'dark')">
         <span class="ic h-5 w-5" x-html="icon(theme === 'dark' ? 'sun' : 'moon')"></span>
-        <span x-text="theme === 'dark' ? 'โหมดสว่าง' : 'โหมดมืด'"></span>
+        <span x-text="theme === 'dark' ? tr('โหมดสว่าง') : tr('โหมดมืด')"></span>
       </button>
       <button class="nav-link" @click="account.open = true">
-        <span class="ic h-5 w-5" x-html="icon('gear')"></span>ตั้งค่า
+        <span class="ic h-5 w-5" x-html="icon('gear')"></span>{{ _('ตั้งค่า') }}
       </button>
       <button class="nav-link hover:!text-[var(--danger-text)]" @click="logout()" :disabled="loggingOut">
-        <span class="ic h-5 w-5" x-html="icon('logout')"></span>ออกจากระบบ
+        <span class="ic h-5 w-5" x-html="icon('logout')"></span>{{ _('ออกจากระบบ') }}
       </button>
     </div>
   </aside>
@@ -266,12 +266,12 @@
         <span class="min-w-0 truncate text-[12px] text-[var(--muted)]" x-show="health.tone !== 'ok'" x-text="health.text"></span>
         <button class="ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
                 @click="setTheme(theme === 'dark' ? 'light' : 'dark')"
-                :aria-label="theme === 'dark' ? 'เปลี่ยนเป็นโหมดสว่าง' : 'เปลี่ยนเป็นโหมดมืด'">
+                :aria-label="theme === 'dark' ? tr('เปลี่ยนเป็นโหมดสว่าง') : tr('เปลี่ยนเป็นโหมดมืด')">
           <span class="ic h-5 w-5" x-html="icon(theme === 'dark' ? 'sun' : 'moon')"></span>
         </button>
         <!-- Settings live here on a phone: the tab bar holds the five pages. -->
         <button class="-mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
-                @click="account.open = true" aria-label="ตั้งค่า">
+                @click="account.open = true" aria-label="{{ _('ตั้งค่า') }}">
           <span class="ic h-5 w-5" x-html="icon('gear')"></span>
         </button>
       </div>
@@ -289,10 +289,10 @@
             <p class="mt-1 text-[14px] text-[var(--muted)]" x-text="houseLine"></p>
           </div>
           <div class="hidden md:block">
-            <h1 class="text-[30px] font-semibold leading-tight tracking-tight">ภาพรวม</h1>
+            <h1 class="text-[30px] font-semibold leading-tight tracking-tight">{{ _('ภาพรวม') }}</h1>
             <p class="mt-2 flex items-baseline gap-3">
               <span class="text-[40px] font-semibold leading-none tracking-tight tabular-nums" x-text="clockNow"></span>
-              <span class="text-[14px] text-[var(--muted)]" x-text="today + ' · บ้าน'"></span>
+              <span class="text-[14px] text-[var(--muted)]" x-text="today + tr(' · บ้าน')"></span>
             </p>
           </div>
 
@@ -301,13 +301,13 @@
           <template x-if="devices.length === 0">
             <div class="pane px-6 py-20 text-center text-[15px] leading-relaxed">
               <p class="text-[var(--muted)]"
-                 x-text="!socket ? 'ต่อเซิร์ฟเวอร์ไม่ได้'
-                       : !adapterConnected ? 'ยังต่อ ' + adapterName + ' ไม่ได้'
-                       : 'ยังไม่มีอุปกรณ์'"></p>
+                 x-text="!socket ? tr('ต่อเซิร์ฟเวอร์ไม่ได้')
+                       : !adapterConnected ? tr('ยังต่อ {name} ไม่ได้', { name: adapterName })
+                       : tr('ยังไม่มีอุปกรณ์')"></p>
               <p class="mt-1 text-[13px] text-[var(--faint)]"
-                 x-text="!socket ? 'กำลังลองเชื่อมต่อใหม่อัตโนมัติ'
-                       : !adapterConnected ? 'ตรวจว่า matter-server รันอยู่ และ MATTER_WS_URL ชี้ถูกที่'
-                       : 'matter-server พร้อมแล้ว — commission Hub เข้า fabric ก่อน'"></p>
+                 x-text="!socket ? tr('กำลังลองเชื่อมต่อใหม่อัตโนมัติ')
+                       : !adapterConnected ? tr('ตรวจว่า matter-server รันอยู่ และ MATTER_WS_URL ชี้ถูกที่')
+                       : tr('matter-server พร้อมแล้ว — commission Hub เข้า fabric ก่อน')"></p>
             </div>
           </template>
 
@@ -320,16 +320,16 @@
                    class="flex items-center gap-3 rounded-2xl border border-[rgb(236_122_102/.4)] bg-[rgb(236_122_102/.12)] px-4 py-3 md:hidden">
                   <span class="ic h-5 w-5" :style="'color: ' + issues[0].color" x-html="icon('alert-' + issues[0].kind)"></span>
                   <span class="min-w-0 flex-1 truncate text-[14px] font-medium"
-                        x-text="issues[0].title + (issues.length > 1 ? ' และอีก ' + (issues.length - 1) + ' เรื่อง' : '')"></span>
+                        x-text="issues[0].title + (issues.length > 1 ? ' ' + tr('และอีก {n} เรื่อง', { n: issues.length - 1 }) : '')"></span>
                   <span class="ic h-4 w-4 text-[var(--muted)]" x-html="icon('chevron')"></span>
                 </a>
               </template>
 
               <!-- Tablet and up: the numbers. -->
-              <section aria-label="ภาพรวมบ้าน" class="hidden grid-cols-2 gap-4 md:grid xl:grid-cols-4">
+              <section aria-label="{{ _('ภาพรวมบ้าน') }}" class="hidden grid-cols-2 gap-4 md:grid xl:grid-cols-4">
                 <div class="pane p-4">
                   <div class="flex items-center justify-between text-[14px] text-[var(--muted)]">
-                    <span>ออนไลน์</span><span class="ic h-5 w-5 text-[var(--faint)]" x-html="icon('wifi')"></span>
+                    <span>{{ _('ออนไลน์') }}</span><span class="ic h-5 w-5 text-[var(--faint)]" x-html="icon('wifi')"></span>
                   </div>
                   <p class="mt-2 text-[32px] font-medium leading-tight tabular-nums">
                     <span x-text="onlineCount"></span><span class="text-[18px] text-[var(--faint)]" x-text="'/' + devices.length"></span>
@@ -337,7 +337,7 @@
                 </div>
                 <div class="pane p-4">
                   <div class="flex items-center justify-between text-[14px] text-[var(--muted)]">
-                    <span>เปิดอยู่</span><span class="ic h-5 w-5 text-[var(--faint)]" x-html="icon('power')"></span>
+                    <span>{{ _('เปิดอยู่') }}</span><span class="ic h-5 w-5 text-[var(--faint)]" x-html="icon('power')"></span>
                   </div>
                   <p class="mt-2 text-[32px] font-medium leading-tight tabular-nums">
                     <span x-text="onCount"></span><span class="text-[18px] text-[var(--faint)]" x-text="'/' + switchable.length"></span>
@@ -345,7 +345,7 @@
                 </div>
                 <div class="pane p-4">
                   <div class="flex items-center justify-between text-[14px] text-[var(--muted)]">
-                    <span>ในบ้าน</span><span class="ic h-5 w-5 text-[var(--faint)]" x-html="icon('thermo')"></span>
+                    <span>{{ _('ในบ้าน') }}</span><span class="ic h-5 w-5 text-[var(--faint)]" x-html="icon('thermo')"></span>
                   </div>
                   <p class="mt-2 text-[32px] font-medium leading-tight tabular-nums">
                     <template x-if="climate('temperature')">
@@ -359,7 +359,7 @@
                 </div>
                 <a href="#/alerts" class="pane block p-4 transition-colors hover:border-[var(--line-strong)]">
                   <div class="flex items-center justify-between text-[14px] text-[var(--muted)]">
-                    <span>แจ้งเตือน</span><span class="ic h-5 w-5 text-[var(--faint)]" x-html="icon('bell')"></span>
+                    <span>{{ _('แจ้งเตือน') }}</span><span class="ic h-5 w-5 text-[var(--faint)]" x-html="icon('bell')"></span>
                   </div>
                   <p class="mt-2 text-[32px] font-medium leading-tight tabular-nums"
                      :class="issues.length && 'text-[var(--warn-text)]'" x-text="issues.length"></p>
@@ -370,8 +370,8 @@
                    chips to swipe on a phone, a grid from tablet up. -->
               <section x-show="groups.length" class="pane p-4 md:p-5" aria-labelledby="groups-title">
                 <div class="mb-3 flex items-baseline justify-between gap-3">
-                  <h2 id="groups-title" class="text-[16px] font-semibold">กลุ่มด่วน</h2>
-                  <a href="#/groups" class="text-[14px] text-[var(--accent-text)] hover:underline">จัดการกลุ่ม</a>
+                  <h2 id="groups-title" class="text-[16px] font-semibold">{{ _('กลุ่มด่วน') }}</h2>
+                  <a href="#/groups" class="text-[14px] text-[var(--accent-text)] hover:underline">{{ _('จัดการกลุ่ม') }}</a>
                 </div>
                 <div class="no-scrollbar -mx-4 flex gap-2.5 overflow-x-auto px-4 md:mx-0 md:grid md:grid-cols-3 md:gap-3 md:overflow-visible md:px-0 xl:grid-cols-4">
                   <template x-for="g in groups" :key="g.key">
@@ -380,7 +380,7 @@
                         <span class="ic h-6 w-6" :class="g.on > 0 ? 'text-[var(--accent-text)]' : 'text-[var(--faint)]'"
                               x-html="icon(g.kind === 'all' ? 'power' : g.kind === 'room' ? 'room' : 'group')"></span>
                         <button class="toggle" :aria-pressed="g.on > 0 ? 'true' : 'false'"
-                                :aria-label="(g.on > 0 ? 'ปิด' : 'เปิด') + 'กลุ่ม ' + g.name"
+                                :aria-label="tr(g.on > 0 ? 'ปิดกลุ่ม {name}' : 'เปิดกลุ่ม {name}', { name: g.name })"
                                 :disabled="!g.live.length" @click="toggleGroup(g)"></button>
                       </div>
                       <div class="min-w-0">
@@ -395,11 +395,11 @@
               <div class="grid items-start gap-5 md:gap-6 xl:grid-cols-[minmax(0,1.9fr)_minmax(0,1fr)]">
                 <section class="pane p-4 md:p-5" aria-labelledby="pinned-title">
                   <div class="mb-3 flex items-baseline justify-between gap-3">
-                    <h2 id="pinned-title" class="text-[16px] font-semibold" x-text="pinsChosen ? 'อุปกรณ์ปักหมุด' : 'อุปกรณ์'"></h2>
-                    <a href="#/devices" class="text-[14px] text-[var(--accent-text)] hover:underline">ดูทั้งหมด</a>
+                    <h2 id="pinned-title" class="text-[16px] font-semibold" x-text="pinsChosen ? tr('อุปกรณ์ปักหมุด') : tr('อุปกรณ์')"></h2>
+                    <a href="#/devices" class="text-[14px] text-[var(--accent-text)] hover:underline">{{ _('ดูทั้งหมด') }}</a>
                   </div>
                   <p class="-mt-1 mb-3 text-[13px] text-[var(--faint)]" x-show="!pinsChosen">
-                    ปักหมุดอุปกรณ์ที่ใช้บ่อยได้จากหน้าของอุปกรณ์นั้น
+                    {{ _('ปักหมุดอุปกรณ์ที่ใช้บ่อยได้จากหน้าของอุปกรณ์นั้น') }}
                   </p>
                   <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:gap-3">
                     <template x-for="d in pinned" :key="d.id">
@@ -411,8 +411,8 @@
                 <div class="hidden flex-col gap-5 md:flex md:gap-6">
                 <section class="pane p-5" aria-labelledby="alerts-title">
                   <div class="mb-2 flex items-baseline justify-between gap-3">
-                    <h2 id="alerts-title" class="text-[16px] font-semibold">แจ้งเตือน</h2>
-                    <a href="#/alerts" class="text-[14px] text-[var(--accent-text)] hover:underline">ดูทั้งหมด</a>
+                    <h2 id="alerts-title" class="text-[16px] font-semibold">{{ _('แจ้งเตือน') }}</h2>
+                    <a href="#/alerts" class="text-[14px] text-[var(--accent-text)] hover:underline">{{ _('ดูทั้งหมด') }}</a>
                   </div>
                   <template x-for="it in issues.slice(0, 5)" :key="it.key">
                     <a :href="'#/device/' + encodeURIComponent(it.id)"
@@ -425,17 +425,17 @@
                     </a>
                   </template>
                   <p class="text-[13px] text-[var(--muted)]" x-show="issues.length > 5"
-                     x-text="'และอีก ' + (issues.length - 5) + ' เรื่อง'"></p>
+                     x-text="tr('และอีก {n} เรื่อง', { n: issues.length - 5 })"></p>
                   <div class="flex items-center gap-2.5 py-3 text-[14px] text-[var(--ok-text)]" x-show="!issues.length">
-                    <span class="ic h-5 w-5" x-html="icon('check')"></span>ทุกอย่างปกติ
+                    <span class="ic h-5 w-5" x-html="icon('check')"></span>{{ _('ทุกอย่างปกติ') }}
                   </div>
                 </section>
 
                 <!-- What the rules did lately, once there are rules. -->
                 <section class="pane p-5" aria-labelledby="ruleact-title" x-show="rules.length">
                   <div class="mb-2 flex items-baseline justify-between gap-3">
-                    <h2 id="ruleact-title" class="text-[16px] font-semibold">กฎล่าสุด</h2>
-                    <a href="#/automations" class="text-[14px] text-[var(--accent-text)] hover:underline">ดูทั้งหมด</a>
+                    <h2 id="ruleact-title" class="text-[16px] font-semibold">{{ _('กฎล่าสุด') }}</h2>
+                    <a href="#/automations" class="text-[14px] text-[var(--accent-text)] hover:underline">{{ _('ดูทั้งหมด') }}</a>
                   </div>
                   <template x-for="e in automations.log.slice(0, 4)" :key="e.ts + e.rule + e.result">
                     <div class="flex items-start gap-2.5 py-1.5 text-[13px]">
@@ -446,7 +446,7 @@
                       </span>
                     </div>
                   </template>
-                  <p class="text-[13px] text-[var(--faint)]" x-show="!automations.log.length">ยังไม่มีกฎทำงานตั้งแต่เปิดเครื่อง</p>
+                  <p class="text-[13px] text-[var(--faint)]" x-show="!automations.log.length">{{ _('ยังไม่มีกฎทำงานตั้งแต่เปิดเครื่อง') }}</p>
                 </section>
                 </div>
               </div>
@@ -456,7 +456,7 @@
               <template x-if="historyEnabled && climateSensors.length">
                 <section class="pane p-4 md:p-5" aria-labelledby="climate-title">
                   <div class="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-                    <h2 id="climate-title" class="text-[16px] font-semibold">อากาศในบ้าน</h2>
+                    <h2 id="climate-title" class="text-[16px] font-semibold">{{ _('อากาศในบ้าน') }}</h2>
                     <template x-if="climateSensors.length > 1">
                       <div class="no-scrollbar flex gap-1.5 overflow-x-auto">
                         <template x-for="s in climateSensors" :key="s.id">
@@ -484,23 +484,23 @@
         <div class="flex flex-col gap-5">
           <div class="flex flex-wrap items-end gap-3">
             <div class="mr-auto">
-              <h1 class="text-[26px] font-semibold leading-tight tracking-tight md:text-[30px]">อุปกรณ์</h1>
+              <h1 class="text-[26px] font-semibold leading-tight tracking-tight md:text-[30px]">{{ _('อุปกรณ์') }}</h1>
               <p class="mt-1 text-[14px] text-[var(--muted)]"
-                 x-text="'จับคู่แล้ว ' + devices.length + ' · ออนไลน์ ' + onlineCount"></p>
+                 x-text="tr('จับคู่แล้ว {n} · ออนไลน์ {on}', { n: devices.length, on: onlineCount })"></p>
             </div>
-            <div class="seg" role="group" aria-label="กรองอุปกรณ์">
-              <button @click="filter = 'all'" :aria-pressed="filter === 'all' ? 'true' : 'false'">ทั้งหมด</button>
-              <button @click="filter = 'online'" :aria-pressed="filter === 'online' ? 'true' : 'false'">ออนไลน์</button>
-              <button @click="filter = 'attention'" :aria-pressed="filter === 'attention' ? 'true' : 'false'">ต้องดูแล</button>
+            <div class="seg" role="group" aria-label="{{ _('กรองอุปกรณ์') }}">
+              <button @click="filter = 'all'" :aria-pressed="filter === 'all' ? 'true' : 'false'">{{ _('ทั้งหมด') }}</button>
+              <button @click="filter = 'online'" :aria-pressed="filter === 'online' ? 'true' : 'false'">{{ _('ออนไลน์') }}</button>
+              <button @click="filter = 'attention'" :aria-pressed="filter === 'attention' ? 'true' : 'false'">{{ _('ต้องดูแล') }}</button>
             </div>
             <button class="btn btn-ghost" @click="refresh()" :disabled="refreshing">
-              <span class="ic h-[18px] w-[18px]" :class="refreshing && 'spin'" x-html="icon('refresh')"></span>สแกนใหม่
+              <span class="ic h-[18px] w-[18px]" :class="refreshing && 'spin'" x-html="icon('refresh')"></span>{{ _('สแกนใหม่') }}
             </button>
           </div>
 
-          <section class="pane overflow-hidden" aria-label="รายการอุปกรณ์">
+          <section class="pane overflow-hidden" aria-label="{{ _('รายการอุปกรณ์') }}">
             <div class="hidden grid-cols-[minmax(0,2fr)_minmax(0,1.2fr)_110px_90px_60px] gap-4 border-b border-[var(--line)] px-5 py-3 text-[12px] font-medium text-[var(--faint)] md:grid">
-              <span>อุปกรณ์</span><span>ห้อง</span><span>สถานะ</span><span>แบตเตอรี่</span><span class="text-right">สั่งงาน</span>
+              <span>{{ _('อุปกรณ์##one') }}</span><span>{{ _('ห้อง') }}</span><span>{{ _('สถานะ') }}</span><span>{{ _('แบตเตอรี่') }}</span><span class="text-right">{{ _('สั่งงาน') }}</span>
             </div>
             <template x-for="d in listed" :key="d.id">
               <div class="tile-link relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b border-[var(--line)] px-4 py-3 last:border-b-0 md:grid-cols-[minmax(0,2fr)_minmax(0,1.2fr)_110px_90px_60px] md:px-5"
@@ -525,7 +525,7 @@
                   <template x-if="isSwitchable(d)">
                     <button class="toggle" :class="isPending(d.id, 'switch') && 'is-pending'"
                             :aria-pressed="isOn(d) ? 'true' : 'false'"
-                            :aria-label="(isOn(d) ? 'ปิด ' : 'เปิด ') + d.name"
+                            :aria-label="(isOn(d) ? tr('ปิด ') : tr('เปิด ')) + d.name"
                             :disabled="!d.online" @click="toggle(d)"></button>
                   </template>
                   <template x-if="!isSwitchable(d)">
@@ -535,7 +535,7 @@
               </div>
             </template>
             <p class="px-5 py-10 text-center text-[14px] text-[var(--faint)]" x-show="!listed.length"
-               x-text="devices.length ? 'ไม่มีอุปกรณ์ในตัวกรองนี้' : 'ยังไม่มีอุปกรณ์'"></p>
+               x-text="devices.length ? tr('ไม่มีอุปกรณ์ในตัวกรองนี้') : tr('ยังไม่มีอุปกรณ์')"></p>
           </section>
         </div>
       </template>
@@ -544,12 +544,12 @@
       <template x-if="page === 'device'">
         <div class="flex flex-col gap-5">
           <a href="#/devices" class="inline-flex w-fit items-center gap-1 text-[14px] text-[var(--accent-text)] hover:underline">
-            <span class="ic h-4 w-4" x-html="icon('back')"></span>อุปกรณ์
+            <span class="ic h-4 w-4" x-html="icon('back')"></span>{{ _('อุปกรณ์') }}
           </a>
 
           <template x-if="!detail">
             <div class="pane px-6 py-16 text-center text-[15px] text-[var(--muted)]"
-                 x-text="devices.length ? 'ไม่พบอุปกรณ์นี้ อาจถูกนำออกจาก Hub แล้ว' : 'กำลังโหลด…'"></div>
+                 x-text="devices.length ? tr('ไม่พบอุปกรณ์นี้ อาจถูกนำออกจาก Hub แล้ว') : tr('กำลังโหลด…')"></div>
           </template>
 
           <template x-if="detail">
@@ -573,10 +573,10 @@
                   <button class="btn btn-ghost" @click="togglePin(detail)"
                           :aria-pressed="isPinned(detail) ? 'true' : 'false'">
                     <span class="ic h-[18px] w-[18px]" :class="isPinned(detail) && 'text-[var(--accent-text)]'" x-html="icon('pin')"></span>
-                    <span x-text="isPinned(detail) ? 'ปักหมุดแล้ว' : 'ปักหมุด'"></span>
+                    <span x-text="isPinned(detail) ? tr('ปักหมุดแล้ว') : tr('ปักหมุด')"></span>
                   </button>
                   <button class="btn btn-ghost" @click="startEdit(detail)" x-show="editing !== detail.id">
-                    <span class="ic h-[18px] w-[18px]" x-html="icon('pencil')"></span>ชื่อ/ห้อง
+                    <span class="ic h-[18px] w-[18px]" x-html="icon('pencil')"></span>{{ _('ชื่อ/ห้อง') }}
                   </button>
                 </div>
               </div>
@@ -587,38 +587,38 @@
                 <div class="pane p-5" @keydown.escape.stop="cancelEdit()">
                   <div class="grid gap-3 sm:grid-cols-2">
                     <label class="block">
-                      <span class="mb-1.5 block text-[14px]">ชื่ออุปกรณ์</span>
+                      <span class="mb-1.5 block text-[14px]">{{ _('ชื่ออุปกรณ์') }}</span>
                       <input x-model="draft.name" maxlength="60" class="field"
                              x-init="$nextTick(() => $el.focus())" @keydown.enter.stop="saveEdit(detail)">
                     </label>
                     <label class="block">
-                      <span class="mb-1.5 block text-[14px]">ห้อง</span>
+                      <span class="mb-1.5 block text-[14px]">{{ _('ห้อง') }}</span>
                       <input x-model="draft.room" maxlength="60" list="room-names" class="field"
-                             placeholder="เช่น ห้องนั่งเล่น" @keydown.enter.stop="saveEdit(detail)">
+                             placeholder="{{ _('เช่น ห้องนั่งเล่น') }}" @keydown.enter.stop="saveEdit(detail)">
                     </label>
                   </div>
                   <div class="mt-4 flex flex-wrap items-center gap-2">
-                    <button class="btn btn-accent" @click="saveEdit(detail)" :disabled="saving">บันทึก</button>
-                    <button class="btn" @click="cancelEdit()">ยกเลิก</button>
+                    <button class="btn btn-accent" @click="saveEdit(detail)" :disabled="saving">{{ _('บันทึก') }}</button>
+                    <button class="btn" @click="cancelEdit()">{{ _('ยกเลิก') }}</button>
                     <template x-if="detail.hub_name">
                       <button class="btn ml-auto text-[14px] text-[var(--faint)]" @click="resetLabel(detail)"
-                              :title="'กลับไปใช้ ' + detail.hub_name">ใช้ชื่อจาก hub</button>
+                              :title="tr('กลับไปใช้ ') + detail.hub_name">{{ _('ใช้ชื่อจาก hub') }}</button>
                     </template>
                   </div>
                 </div>
               </template>
 
               <div class="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.45fr)]">
-                <section class="pane flex flex-col gap-5 p-5" aria-label="การควบคุมและค่าล่าสุด">
+                <section class="pane flex flex-col gap-5 p-5" aria-label="{{ _('การควบคุมและค่าล่าสุด') }}">
                   <template x-if="isSwitchable(detail)">
                     <div class="flex items-center justify-between gap-4">
                       <div>
-                        <p class="text-[13px] text-[var(--faint)]">การทำงาน</p>
+                        <p class="text-[13px] text-[var(--faint)]">{{ _('การทำงาน') }}</p>
                         <p class="mt-0.5 text-[22px] font-medium" x-text="stateText(detail)"></p>
                       </div>
                       <button class="toggle" :class="isPending(detail.id, 'switch') && 'is-pending'"
                               :aria-pressed="isOn(detail) ? 'true' : 'false'"
-                              :aria-label="(isOn(detail) ? 'ปิด ' : 'เปิด ') + detail.name"
+                              :aria-label="(isOn(detail) ? tr('ปิด ') : tr('เปิด ')) + detail.name"
                               :disabled="!detail.online" @click="toggle(detail)"></button>
                     </div>
                   </template>
@@ -657,39 +657,39 @@
                   </template>
 
                   <dl class="grid grid-cols-2 gap-x-4 gap-y-3 border-t border-[var(--line)] pt-4 text-[14px]">
-                    <div><dt class="text-[13px] text-[var(--faint)]">แบตเตอรี่</dt><dd class="mt-0.5" x-text="batteryText(detail)"></dd></div>
-                    <div><dt class="text-[13px] text-[var(--faint)]">อัปเดตล่าสุด</dt><dd class="mt-0.5" x-text="lastSeen(detail)"></dd></div>
-                    <div><dt class="text-[13px] text-[var(--faint)]">ตัวเชื่อม</dt><dd class="mt-0.5" x-text="detail.adapter"></dd></div>
-                    <div class="min-w-0"><dt class="text-[13px] text-[var(--faint)]">รหัสใน Hub</dt><dd class="mt-0.5 truncate" x-text="detail.native_id"></dd></div>
+                    <div><dt class="text-[13px] text-[var(--faint)]">{{ _('แบตเตอรี่') }}</dt><dd class="mt-0.5" x-text="batteryText(detail)"></dd></div>
+                    <div><dt class="text-[13px] text-[var(--faint)]">{{ _('อัปเดตล่าสุด') }}</dt><dd class="mt-0.5" x-text="lastSeen(detail)"></dd></div>
+                    <div><dt class="text-[13px] text-[var(--faint)]">{{ _('ตัวเชื่อม') }}</dt><dd class="mt-0.5" x-text="detail.adapter"></dd></div>
+                    <div class="min-w-0"><dt class="text-[13px] text-[var(--faint)]">{{ _('รหัสใน Hub') }}</dt><dd class="mt-0.5 truncate" x-text="detail.native_id"></dd></div>
                   </dl>
                   <template x-if="staleness(detail)">
                     <p class="text-[13px]" :style="'color: ' + staleness(detail).color" x-text="staleness(detail).text"></p>
                   </template>
 
                   <div class="border-t border-[var(--line)] pt-4">
-                    <p class="mb-1.5 text-[13px] text-[var(--faint)]">กฎที่ใช้อุปกรณ์นี้</p>
+                    <p class="mb-1.5 text-[13px] text-[var(--faint)]">{{ _('กฎที่ใช้อุปกรณ์นี้') }}</p>
                     <template x-for="r in rulesFor(detail)" :key="r.id">
                       <a :href="'#/automations/' + encodeURIComponent(r.id)"
                          class="-mx-2 flex items-center gap-2 rounded-xl px-2 py-2 text-[14px] hover:bg-[var(--tile-hover)]">
                         <span class="ic h-4 w-4 text-[var(--accent-text)]" x-html="icon('flow')"></span>
                         <span class="min-w-0 flex-1 truncate" x-text="r.name"></span>
-                        <span class="text-[12px] text-[var(--faint)]" x-show="!r.enabled">หยุดไว้</span>
+                        <span class="text-[12px] text-[var(--faint)]" x-show="!r.enabled">{{ _('หยุดไว้') }}</span>
                       </a>
                     </template>
                     <p class="text-[14px] text-[var(--muted)]" x-show="!rulesFor(detail).length">
-                      ยังไม่มี — <a href="#/automations" class="text-[var(--accent-text)] hover:underline">สร้างกฎ</a>
+                      {{ _('ยังไม่มี —') }} <a href="#/automations" class="text-[var(--accent-text)] hover:underline">{{ _('สร้างกฎ') }}</a>
                     </p>
                   </div>
                 </section>
 
                 <section class="pane p-5" aria-labelledby="history-title">
-                  <h2 id="history-title" class="mb-3 text-[16px] font-semibold">ประวัติ</h2>
+                  <h2 id="history-title" class="mb-3 text-[16px] font-semibold">{{ _('ประวัติ') }}</h2>
                   <template x-if="historyEnabled">
                     {{ chart_block() }}
                   </template>
                   <template x-if="!historyEnabled">
                     <p class="text-[14px] leading-relaxed text-[var(--muted)]">
-                      ยังไม่ได้เปิดบันทึกประวัติ — ตั้ง <code>DATABASE_URL</code> บนเครื่องที่รัน dashboard แล้วกราฟจะขึ้นเอง
+                      {{ _('ยังไม่ได้เปิดบันทึกประวัติ — ตั้ง') }} <code>DATABASE_URL</code> {{ _('บนเครื่องที่รัน dashboard แล้วกราฟจะขึ้นเอง') }}
                     </p>
                   </template>
                 </section>
@@ -704,16 +704,16 @@
         <div class="flex flex-col gap-6">
           <div class="flex flex-wrap items-end gap-3">
             <div class="mr-auto">
-              <h1 class="text-[26px] font-semibold leading-tight tracking-tight md:text-[30px]">กลุ่ม</h1>
-              <p class="mt-1 text-[14px] text-[var(--muted)]">สั่งหลายอุปกรณ์พร้อมกัน ข้ามห้องได้</p>
+              <h1 class="text-[26px] font-semibold leading-tight tracking-tight md:text-[30px]">{{ _('กลุ่ม') }}</h1>
+              <p class="mt-1 text-[14px] text-[var(--muted)]">{{ _('สั่งหลายอุปกรณ์พร้อมกัน ข้ามห้องได้') }}</p>
             </div>
             <button class="btn btn-accent" @click="newGroup()">
-              <span class="ic h-[18px] w-[18px]" x-html="icon('plus')"></span>สร้างกลุ่ม
+              <span class="ic h-[18px] w-[18px]" x-html="icon('plus')"></span>{{ _('สร้างกลุ่ม') }}
             </button>
           </div>
 
           <section aria-labelledby="made-title">
-            <h2 id="made-title" class="mb-3 text-[16px] font-semibold">กลุ่มที่สร้างเอง</h2>
+            <h2 id="made-title" class="mb-3 text-[16px] font-semibold">{{ _('กลุ่มที่สร้างเอง') }}</h2>
             <div class="grid items-start gap-3 md:grid-cols-2">
               <template x-for="g in madeGroups" :key="g.key">
                 {{ group_card('g') }}
@@ -722,18 +722,18 @@
             <template x-if="!madeGroups.length">
               <div class="pane flex flex-col items-center px-6 py-10 text-center">
                 <span class="ic h-9 w-9 text-[var(--faint)]" x-html="icon('group')"></span>
-                <p class="mt-3 text-[16px] font-medium">ยังไม่มีกลุ่ม</p>
+                <p class="mt-3 text-[16px] font-medium">{{ _('ยังไม่มีกลุ่ม') }}</p>
                 <p class="mt-1 max-w-[340px] text-[14px] text-[var(--muted)]">
-                  เช่น "ไฟชั้นล่าง" หรือ "ปิดก่อนนอน" — รวมอุปกรณ์จากหลายห้องไว้สั่งทีเดียว
+                  {{ _('เช่น "ไฟชั้นล่าง" หรือ "ปิดก่อนนอน" — รวมอุปกรณ์จากหลายห้องไว้สั่งทีเดียว') }}
                 </p>
-                <button class="btn btn-ghost mt-4" @click="newGroup()">สร้างกลุ่มแรก</button>
+                <button class="btn btn-ghost mt-4" @click="newGroup()">{{ _('สร้างกลุ่มแรก') }}</button>
               </div>
             </template>
           </section>
 
           <section aria-labelledby="room-groups-title" x-show="roomGroups.length">
-            <h2 id="room-groups-title" class="text-[16px] font-semibold">ทั้งบ้านและตามห้อง</h2>
-            <p class="mb-3 mt-0.5 text-[13px] text-[var(--faint)]">สร้างให้เองจากห้องที่ตั้งไว้ในหน้าอุปกรณ์</p>
+            <h2 id="room-groups-title" class="text-[16px] font-semibold">{{ _('ทั้งบ้านและตามห้อง') }}</h2>
+            <p class="mb-3 mt-0.5 text-[13px] text-[var(--faint)]">{{ _('สร้างให้เองจากห้องที่ตั้งไว้ในหน้าอุปกรณ์') }}</p>
             <div class="grid items-start gap-3 md:grid-cols-2">
               <template x-for="g in roomGroups" :key="g.key">
                 {{ group_card('g') }}
@@ -748,17 +748,17 @@
         <div class="flex flex-col gap-5">
           <div class="flex flex-wrap items-end gap-3">
             <div class="mr-auto">
-              <h1 class="text-[26px] font-semibold leading-tight tracking-tight md:text-[30px]">อัตโนมัติ</h1>
-              <p class="mt-1 text-[14px] text-[var(--muted)]">เมื่อ → ถ้า → ให้ทำ · ทำงานบน Pi แม้ไม่มีใครเปิดหน้าเว็บ</p>
+              <h1 class="text-[26px] font-semibold leading-tight tracking-tight md:text-[30px]">{{ _('อัตโนมัติ') }}</h1>
+              <p class="mt-1 text-[14px] text-[var(--muted)]">{{ _('เมื่อ → ถ้า → ให้ทำ · ทำงานบน Pi แม้ไม่มีใครเปิดหน้าเว็บ') }}</p>
             </div>
             <button class="btn btn-accent" @click="newRule()" :disabled="!automations.enabled">
-              <span class="ic h-[18px] w-[18px]" x-html="icon('plus')"></span>สร้างกฎ
+              <span class="ic h-[18px] w-[18px]" x-html="icon('plus')"></span>{{ _('สร้างกฎ') }}
             </button>
           </div>
 
           <template x-if="!automations.enabled">
             <div class="pane p-5 text-[14px] text-[var(--warn-text)]">
-              ระบบอัตโนมัติปิดอยู่ — ตั้ง <code>AUTOMATIONS_PATH</code> บนเครื่องที่รัน dashboard เพื่อเปิด
+              {{ _('ระบบอัตโนมัติปิดอยู่ — ตั้ง') }} <code>AUTOMATIONS_PATH</code> {{ _('บนเครื่องที่รัน dashboard เพื่อเปิด') }}
             </div>
           </template>
 
@@ -771,25 +771,25 @@
                   <button class="min-w-0 flex-1 rounded-lg text-left" @click="openRule(r.id)">
                     <span class="block truncate text-[15px] font-medium" x-text="r.name"></span>
                     <span class="block truncate text-[13px] text-[var(--faint)]"
-                          x-text="ruleStats(r).runs ? 'ทำงาน ' + ruleStats(r).runs + ' ครั้ง · ล่าสุด ' + clock(ruleStats(r).last) : (r.enabled ? 'ยังไม่เคยทำงาน' : 'หยุดไว้')"></span>
+                          x-text="ruleStats(r).runs ? tr('ทำงาน {n} ครั้ง · ล่าสุด {at}', { n: ruleStats(r).runs, at: clock(ruleStats(r).last) }) : (r.enabled ? tr('ยังไม่เคยทำงาน') : tr('หยุดไว้'))"></span>
                   </button>
                   <button class="toggle" :aria-pressed="r.enabled ? 'true' : 'false'"
-                          :aria-label="(r.enabled ? 'หยุดกฎ ' : 'เปิดกฎ ') + r.name" @click="setRuleEnabled(r, !r.enabled)"></button>
+                          :aria-label="(r.enabled ? tr('หยุดกฎ ') : tr('เปิดกฎ ')) + r.name" @click="setRuleEnabled(r, !r.enabled)"></button>
                 </div>
               </template>
               <template x-if="!rules.length && automations.enabled">
                 <div class="pane flex flex-col items-center px-6 py-10 text-center">
                   <span class="ic h-9 w-9 text-[var(--faint)]" x-html="icon('flow')"></span>
-                  <p class="mt-3 text-[16px] font-medium">ยังไม่มีกฎ</p>
+                  <p class="mt-3 text-[16px] font-medium">{{ _('ยังไม่มีกฎ') }}</p>
                   <p class="mt-1 max-w-[300px] text-[14px] text-[var(--muted)]">
-                    เช่น "22:30 ทุกวัน → ปิดไฟชั้นล่าง" หรือ "หน้าต่างเปิด → ปิดแอร์"
+                    {{ _('เช่น "22:30 ทุกวัน → ปิดไฟชั้นล่าง" หรือ "หน้าต่างเปิด → ปิดแอร์"') }}
                   </p>
-                  <button class="btn btn-ghost mt-4" @click="newRule()">สร้างกฎแรก</button>
+                  <button class="btn btn-ghost mt-4" @click="newRule()">{{ _('สร้างกฎแรก') }}</button>
                 </div>
               </template>
 
               <section class="pane mt-2 p-4" aria-labelledby="runlog-title" x-show="automations.log.length">
-                <h2 id="runlog-title" class="mb-2 text-[15px] font-semibold">ทำงานล่าสุด</h2>
+                <h2 id="runlog-title" class="mb-2 text-[15px] font-semibold">{{ _('ทำงานล่าสุด') }}</h2>
                 <template x-for="(e, i) in automations.log.slice(0, 15)" :key="e.ts + e.rule + e.result">
                   <!-- A phone shows five, so the editor is not pushed far down. -->
                   <div class="items-start gap-2.5 py-1.5 text-[13px]" :class="i < 5 ? 'flex' : 'hidden lg:flex'">
@@ -807,23 +807,23 @@
             <!-- the editor -->
             <template x-if="!ruleEdit.open">
               <div class="pane hidden px-6 py-16 text-center text-[14px] text-[var(--faint)] lg:block">
-                เลือกกฎทางซ้าย หรือสร้างกฎใหม่
+                {{ _('เลือกกฎทางซ้าย หรือสร้างกฎใหม่') }}
               </div>
             </template>
             <template x-if="ruleEdit.open">
               <section id="rule-editor" class="pane flex scroll-mt-4 flex-col gap-5 p-5" aria-labelledby="rule-editor-title">
                 <div class="flex items-center gap-3">
                   <h2 id="rule-editor-title" class="mr-auto text-[18px] font-semibold"
-                      x-text="ruleEdit.id ? 'แก้กฎ' : 'กฎใหม่'"></h2>
+                      x-text="ruleEdit.id ? tr('แก้กฎ') : tr('กฎใหม่')"></h2>
                   <button class="-mr-2 flex h-10 w-10 items-center justify-center rounded-xl hover:bg-[var(--tile-hover)]"
-                          @click="closeEditor()" aria-label="ปิดตัวแก้กฎ">
+                          @click="closeEditor()" aria-label="{{ _('ปิดตัวแก้กฎ') }}">
                     <span class="ic h-5 w-5" x-html="icon('close')"></span>
                   </button>
                 </div>
 
                 <label class="block">
-                  <span class="mb-1.5 block text-[14px]">ชื่อกฎ</span>
-                  <input class="field" x-model="ruleEdit.draft.name" maxlength="60" placeholder="เช่น ปิดไฟก่อนนอน">
+                  <span class="mb-1.5 block text-[14px]">{{ _('ชื่อกฎ') }}</span>
+                  <input class="field" x-model="ruleEdit.draft.name" maxlength="60" placeholder="{{ _('เช่น ปิดไฟก่อนนอน') }}">
                 </label>
 
                 <p class="tile px-3.5 py-3 text-[14px] leading-relaxed" x-text="ruleText(ruleEdit.draft)"></p>
@@ -831,40 +831,40 @@
                 <!-- when -->
                 <div>
                   <div class="mb-2 flex items-center justify-between gap-3">
-                    <h3 class="text-[15px] font-semibold">เมื่อ</h3>
-                    <div class="seg" role="group" aria-label="ชนิดตัวเริ่ม">
+                    <h3 class="text-[15px] font-semibold">{{ _('เมื่อ') }}</h3>
+                    <div class="seg" role="group" aria-label="{{ _('ชนิดตัวเริ่ม') }}">
                       <button type="button" @click="setTriggerType('time')"
-                              :aria-pressed="ruleEdit.draft.trigger.type === 'time' ? 'true' : 'false'">ถึงเวลา</button>
+                              :aria-pressed="ruleEdit.draft.trigger.type === 'time' ? 'true' : 'false'">{{ _('ถึงเวลา') }}</button>
                       <button type="button" @click="setTriggerType('device')"
-                              :aria-pressed="ruleEdit.draft.trigger.type === 'device' ? 'true' : 'false'">อุปกรณ์เปลี่ยน</button>
+                              :aria-pressed="ruleEdit.draft.trigger.type === 'device' ? 'true' : 'false'">{{ _('อุปกรณ์เปลี่ยน') }}</button>
                     </div>
                   </div>
                   <template x-if="ruleEdit.draft.trigger.type === 'time'">
                     <div class="flex flex-col gap-2.5">
-                      <input type="time" class="field !w-36" x-model="ruleEdit.draft.trigger.at" aria-label="เวลา">
+                      <input type="time" class="field !w-36" x-model="ruleEdit.draft.trigger.at" aria-label="{{ _('เวลา') }}">
                       {{ day_chips('ruleEdit.draft.trigger.days') }}
-                      <p class="text-[13px] text-[var(--faint)]" x-text="'ทำงาน' + daysText(ruleEdit.draft.trigger.days) + ' (ไม่เลือกวัน = ทุกวัน)'"></p>
+                      <p class="text-[13px] text-[var(--faint)]" x-text="tr('ทำงาน{days} (ไม่เลือกวัน = ทุกวัน)', { days: daysText(ruleEdit.draft.trigger.days) })"></p>
                     </div>
                   </template>
                   <template x-if="ruleEdit.draft.trigger.type === 'device'">
                     <div>
                       {{ test_fields('ruleEdit.draft.trigger') }}
-                      <p class="mt-2 text-[13px] text-[var(--faint)]">ทำงานตอนที่เพิ่งเปลี่ยนเป็นแบบนี้ ไม่ใช่ทุกครั้งที่อุปกรณ์ส่งค่า</p>
+                      <p class="mt-2 text-[13px] text-[var(--faint)]">{{ _('ทำงานตอนที่เพิ่งเปลี่ยนเป็นแบบนี้ ไม่ใช่ทุกครั้งที่อุปกรณ์ส่งค่า') }}</p>
                     </div>
                   </template>
                 </div>
 
                 <!-- only if -->
                 <div>
-                  <h3 class="mb-2 text-[15px] font-semibold">และถ้า <span class="font-normal text-[var(--faint)]">(ไม่บังคับ)</span></h3>
+                  <h3 class="mb-2 text-[15px] font-semibold">{{ _('และถ้า') }} <span class="font-normal text-[var(--faint)]">{{ _('(ไม่บังคับ)') }}</span></h3>
                   <div class="flex flex-col gap-2">
                     <template x-for="(c, i) in ruleEdit.draft.conditions" :key="c._k">
                       <div class="tile flex items-start gap-2 p-3">
                         <div class="min-w-0 flex-1">
                           <template x-if="c.type === 'time_between'">
                             <div class="flex flex-wrap items-center gap-2 text-[14px]">
-                              ช่วง <input type="time" class="field !h-10 !w-32" x-model="c.from" aria-label="ตั้งแต่">
-                              ถึง <input type="time" class="field !h-10 !w-32" x-model="c.to" aria-label="ถึง">
+                              {{ _('ช่วง') }} <input type="time" class="field !h-10 !w-32" x-model="c.from" aria-label="{{ _('ตั้งแต่') }}">
+                              {{ _('ถึง') }} <input type="time" class="field !h-10 !w-32" x-model="c.to" aria-label="{{ _('ถึง') }}">
                             </div>
                           </template>
                           <template x-if="c.type === 'weekday'">
@@ -875,22 +875,22 @@
                           </template>
                         </div>
                         <button class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[var(--faint)] hover:bg-[var(--tile-hover)] hover:text-[var(--danger-text)]"
-                                @click="ruleEdit.draft.conditions.splice(i, 1)" aria-label="เอาเงื่อนไขนี้ออก">
+                                @click="ruleEdit.draft.conditions.splice(i, 1)" aria-label="{{ _('เอาเงื่อนไขนี้ออก') }}">
                           <span class="ic h-[18px] w-[18px]" x-html="icon('close')"></span>
                         </button>
                       </div>
                     </template>
                   </div>
                   <div class="mt-2 flex flex-wrap gap-2" x-show="ruleEdit.draft.conditions.length < 5">
-                    <button class="btn btn-ghost !h-9 !px-3 text-[14px]" @click="addCondition('time_between')">+ ช่วงเวลา</button>
-                    <button class="btn btn-ghost !h-9 !px-3 text-[14px]" @click="addCondition('weekday')">+ วัน</button>
-                    <button class="btn btn-ghost !h-9 !px-3 text-[14px]" @click="addCondition('device')">+ สถานะอุปกรณ์</button>
+                    <button class="btn btn-ghost !h-9 !px-3 text-[14px]" @click="addCondition('time_between')">{{ _('+ ช่วงเวลา') }}</button>
+                    <button class="btn btn-ghost !h-9 !px-3 text-[14px]" @click="addCondition('weekday')">{{ _('+ วัน') }}</button>
+                    <button class="btn btn-ghost !h-9 !px-3 text-[14px]" @click="addCondition('device')">{{ _('+ สถานะอุปกรณ์') }}</button>
                   </div>
                 </div>
 
                 <!-- then -->
                 <div>
-                  <h3 class="mb-2 text-[15px] font-semibold">ให้ทำ</h3>
+                  <h3 class="mb-2 text-[15px] font-semibold">{{ _('ให้ทำ') }}</h3>
                   <div class="flex flex-col gap-2">
                     <template x-for="(a, i) in ruleEdit.draft.actions" :key="a._k">
                       <div class="tile flex items-start gap-2 p-3">
@@ -899,10 +899,10 @@
                           <template x-if="a.type === 'group'">
                             <div class="flex flex-wrap items-center gap-2">
                               <div class="seg">
-                                <button type="button" @click="a.value = true" :aria-pressed="a.value ? 'true' : 'false'">เปิด</button>
-                                <button type="button" @click="a.value = false" :aria-pressed="!a.value ? 'true' : 'false'">ปิด</button>
+                                <button type="button" @click="a.value = true" :aria-pressed="a.value ? 'true' : 'false'">{{ _('เปิด') }}</button>
+                                <button type="button" @click="a.value = false" :aria-pressed="!a.value ? 'true' : 'false'">{{ _('ปิด') }}</button>
                               </div>
-                              <select class="field !h-10 min-w-[150px] flex-1 !text-[15px]" x-model="a.group" aria-label="กลุ่ม">
+                              <select class="field !h-10 min-w-[150px] flex-1 !text-[15px]" x-model="a.group" aria-label="{{ _('กลุ่ม') }}">
                                 <template x-for="t in groupTargets" :key="t.value">
                                   <option :value="t.value" :selected="t.value === a.group" x-text="t.label"></option>
                                 </template>
@@ -911,12 +911,12 @@
                           </template>
                           <template x-if="a.type === 'device'">
                             <div class="flex flex-wrap items-center gap-2">
-                              <select class="field !h-10 min-w-[150px] flex-1 !text-[15px]" x-model="a.device" @change="fixAction(a)" aria-label="อุปกรณ์">
+                              <select class="field !h-10 min-w-[150px] flex-1 !text-[15px]" x-model="a.device" @change="fixAction(a)" aria-label="{{ _('อุปกรณ์##one') }}">
                                 <template x-for="d in devices.filter(x => x.writable.length)" :key="d.id">
                                   <option :value="d.id" :selected="d.id === a.device" x-text="roomLabel(d.room) + ' · ' + d.name"></option>
                                 </template>
                               </select>
-                              <select class="field !h-10 !w-auto !text-[15px]" x-model="a.capability" @change="fixAction(a)" aria-label="สั่งอะไร"
+                              <select class="field !h-10 !w-auto !text-[15px]" x-model="a.capability" @change="fixAction(a)" aria-label="{{ _('สั่งอะไร') }}"
                                       x-show="capsFor(a.device, true).length > 1">
                                 <template x-for="cap in capsFor(a.device, true)" :key="cap">
                                   <option :value="cap" :selected="cap === a.capability" x-text="LABEL[cap] || cap"></option>
@@ -924,13 +924,13 @@
                               </select>
                               <template x-if="a.capability === 'switch'">
                                 <div class="seg">
-                                  <button type="button" @click="a.value = true" :aria-pressed="a.value === true ? 'true' : 'false'">เปิด</button>
-                                  <button type="button" @click="a.value = false" :aria-pressed="a.value === false ? 'true' : 'false'">ปิด</button>
+                                  <button type="button" @click="a.value = true" :aria-pressed="a.value === true ? 'true' : 'false'">{{ _('เปิด') }}</button>
+                                  <button type="button" @click="a.value = false" :aria-pressed="a.value === false ? 'true' : 'false'">{{ _('ปิด') }}</button>
                                 </div>
                               </template>
                               <template x-if="a.capability !== 'switch'">
                                 <div class="flex items-center gap-2">
-                                  <input type="number" class="field !h-10 !w-24 !text-[15px]" x-model.number="a.value" aria-label="ค่า"
+                                  <input type="number" class="field !h-10 !w-24 !text-[15px]" x-model.number="a.value" aria-label="{{ _('ค่า') }}"
                                          :min="RANGE[a.capability] ? RANGE[a.capability][0] : null" :max="RANGE[a.capability] ? RANGE[a.capability][1] : null">
                                   <span class="text-[14px] text-[var(--faint)]" x-text="UNIT[a.capability] || ''"></span>
                                 </div>
@@ -939,25 +939,25 @@
                           </template>
                           <template x-if="a.type === 'delay'">
                             <div class="flex items-center gap-2 text-[14px]">
-                              รอ
-                              <input type="number" min="1" max="60" class="field !h-10 !w-20 !text-[15px]" aria-label="นาที"
+                              {{ _('รอ') }}
+                              <input type="number" min="1" max="60" class="field !h-10 !w-20 !text-[15px]" aria-label="{{ _('นาที') }}"
                                      :value="Math.round(a.seconds / 60) || 1"
                                      @input="a.seconds = Math.max(1, Math.min(60, Math.round(+$event.target.value) || 1)) * 60">
-                              นาที แล้วค่อยทำข้อต่อไป
+                              {{ _('นาที แล้วค่อยทำข้อต่อไป') }}
                             </div>
                           </template>
                         </div>
                         <button class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[var(--faint)] hover:bg-[var(--tile-hover)] hover:text-[var(--danger-text)]"
-                                @click="ruleEdit.draft.actions.splice(i, 1)" aria-label="เอาข้อนี้ออก">
+                                @click="ruleEdit.draft.actions.splice(i, 1)" aria-label="{{ _('เอาข้อนี้ออก') }}">
                           <span class="ic h-[18px] w-[18px]" x-html="icon('close')"></span>
                         </button>
                       </div>
                     </template>
                   </div>
                   <div class="mt-2 flex flex-wrap gap-2" x-show="ruleEdit.draft.actions.length < 10">
-                    <button class="btn btn-ghost !h-9 !px-3 text-[14px]" @click="addAction('group')">+ สั่งกลุ่ม</button>
-                    <button class="btn btn-ghost !h-9 !px-3 text-[14px]" @click="addAction('device')">+ สั่งอุปกรณ์</button>
-                    <button class="btn btn-ghost !h-9 !px-3 text-[14px]" @click="addAction('delay')">+ รอ</button>
+                    <button class="btn btn-ghost !h-9 !px-3 text-[14px]" @click="addAction('group')">{{ _('+ สั่งกลุ่ม') }}</button>
+                    <button class="btn btn-ghost !h-9 !px-3 text-[14px]" @click="addAction('device')">{{ _('+ สั่งอุปกรณ์') }}</button>
+                    <button class="btn btn-ghost !h-9 !px-3 text-[14px]" @click="addAction('delay')">{{ _('+ รอ') }}</button>
                   </div>
                 </div>
 
@@ -965,18 +965,18 @@
                   <p x-show="ruleEdit.error" class="mb-3 text-[14px] text-[var(--danger-text)]" x-text="ruleEdit.error"></p>
                   <div class="flex flex-wrap items-center gap-2">
                     <button class="btn btn-accent" @click="saveRule()" :disabled="ruleEdit.busy"
-                            x-text="ruleEdit.busy ? 'กำลังบันทึก…' : 'บันทึก'"></button>
+                            x-text="ruleEdit.busy ? tr('กำลังบันทึก…') : tr('บันทึก')"></button>
                     <template x-if="ruleEdit.id">
-                      <button class="btn btn-ghost" @click="testRule()" title="ทำ &quot;ให้ทำ&quot; ทันที โดยไม่ดูเงื่อนไข">
-                        <span class="ic h-4 w-4" x-html="icon('play')"></span>ลองสั่งเลย
+                      <button class="btn btn-ghost" @click="testRule()" title="{{ _('ทำ "ให้ทำ" ทันที โดยไม่ดูเงื่อนไข') }}">
+                        <span class="ic h-4 w-4" x-html="icon('play')"></span>{{ _('ลองสั่งเลย') }}
                       </button>
                     </template>
                     <template x-if="ruleEdit.id">
-                      <button class="btn ml-auto text-[var(--danger-text)]" @click="deleteRule()" :disabled="ruleEdit.busy">ลบกฎ</button>
+                      <button class="btn ml-auto text-[var(--danger-text)]" @click="deleteRule()" :disabled="ruleEdit.busy">{{ _('ลบกฎ') }}</button>
                     </template>
                   </div>
                   <p class="mt-2 text-[13px] text-[var(--faint)]" x-show="ruleEdit.id">
-                    "ลองสั่งเลย" ทำตามรายการ "ให้ทำ" ทันทีโดยไม่ดูเวลาหรือเงื่อนไข — ใช้ฉบับที่บันทึกแล้ว
+                    {{ _('"ลองสั่งเลย" ทำตามรายการ "ให้ทำ" ทันทีโดยไม่ดูเวลาหรือเงื่อนไข — ใช้ฉบับที่บันทึกแล้ว') }}
                   </p>
                 </div>
               </section>
@@ -991,9 +991,9 @@
       <template x-if="page === 'alerts'">
         <div class="flex flex-col gap-4">
           <div class="mb-1">
-            <h1 class="text-[26px] font-semibold leading-tight tracking-tight md:text-[30px]">แจ้งเตือน</h1>
+            <h1 class="text-[26px] font-semibold leading-tight tracking-tight md:text-[30px]">{{ _('แจ้งเตือน') }}</h1>
             <p class="mt-1 text-[14px] text-[var(--muted)]"
-               x-text="issues.length ? issues.length + ' เรื่องที่ต้องดูแลตอนนี้' : 'ไม่มีปัญหาตอนนี้'"></p>
+               x-text="issues.length ? tr('{n} เรื่องที่ต้องดูแลตอนนี้', { n: issues.length }) : tr('ไม่มีปัญหาตอนนี้')"></p>
           </div>
           <template x-for="it in issues" :key="it.key">
             <div class="pane flex items-center gap-4 p-4 md:p-5">
@@ -1005,17 +1005,17 @@
                 <p class="text-[16px] font-medium leading-snug" x-text="it.title"></p>
                 <p class="text-[14px] text-[var(--muted)]" x-text="it.room + ' · ' + it.detail"></p>
               </div>
-              <a :href="'#/device/' + encodeURIComponent(it.id)" class="btn btn-ghost !h-10 shrink-0 !px-3 text-[14px]">ดูอุปกรณ์</a>
+              <a :href="'#/device/' + encodeURIComponent(it.id)" class="btn btn-ghost !h-10 shrink-0 !px-3 text-[14px]">{{ _('ดูอุปกรณ์') }}</a>
             </div>
           </template>
           <template x-if="!issues.length">
             <div class="pane flex flex-col items-center px-6 py-16 text-center">
               <span class="ic h-10 w-10 text-[var(--ok-text)]" x-html="icon('check')"></span>
-              <p class="mt-3 text-[17px] font-medium">ทุกอย่างปกติ</p>
+              <p class="mt-3 text-[17px] font-medium">{{ _('ทุกอย่างปกติ') }}</p>
             </div>
           </template>
           <p class="text-[13px] text-[var(--faint)]">
-            แสดงเฉพาะปัญหาที่เกิดอยู่ตอนนี้ — พอระบบเห็นว่าแก้แล้วจะหายไปเอง
+            {{ _('แสดงเฉพาะปัญหาที่เกิดอยู่ตอนนี้ — พอระบบเห็นว่าแก้แล้วจะหายไปเอง') }}
           </p>
         </div>
       </template>
@@ -1024,21 +1024,21 @@
 
   <!-- ── tab bar (phone) ─────────────────────────────────────────────── -->
   <nav class="pane fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-20 grid grid-cols-5 gap-0.5 p-1 md:hidden"
-       aria-label="เมนูหลัก">
+       aria-label="{{ _('เมนูหลัก') }}">
     <a href="#/" class="tab-link" :aria-current="page === 'overview' ? 'page' : null">
-      <span class="ic h-6 w-6" x-html="icon('overview')"></span>ภาพรวม
+      <span class="ic h-6 w-6" x-html="icon('overview')"></span>{{ _('ภาพรวม') }}
     </a>
     <a href="#/devices" class="tab-link" :aria-current="page === 'devices' || page === 'device' ? 'page' : null">
-      <span class="ic h-6 w-6" x-html="icon('devices')"></span>อุปกรณ์
+      <span class="ic h-6 w-6" x-html="icon('devices')"></span>{{ _('อุปกรณ์') }}
     </a>
     <a href="#/groups" class="tab-link" :aria-current="page === 'groups' ? 'page' : null">
-      <span class="ic h-6 w-6" x-html="icon('group')"></span>กลุ่ม
+      <span class="ic h-6 w-6" x-html="icon('group')"></span>{{ _('กลุ่ม') }}
     </a>
     <a href="#/automations" class="tab-link" :aria-current="page === 'automations' ? 'page' : null">
-      <span class="ic h-6 w-6" x-html="icon('flow')"></span>อัตโนมัติ
+      <span class="ic h-6 w-6" x-html="icon('flow')"></span>{{ _('อัตโนมัติ') }}
     </a>
     <a href="#/alerts" class="tab-link relative" :aria-current="page === 'alerts' ? 'page' : null">
-      <span class="ic h-6 w-6" x-html="icon('bell')"></span>แจ้งเตือน
+      <span class="ic h-6 w-6" x-html="icon('bell')"></span>{{ _('แจ้งเตือน') }}
       <span x-show="issues.length" x-text="issues.length"
             class="absolute right-[calc(50%-22px)] top-1.5 min-w-[18px] rounded-full bg-[var(--accent)] px-1 text-center text-[11px] font-semibold leading-[18px] text-[var(--accent-ink)]"></span>
     </a>
@@ -1064,9 +1064,9 @@
            class="pane dense flex max-h-[92vh] w-full max-w-[480px] flex-col !rounded-b-none sm:!rounded-[24px]">
         <div class="flex items-center justify-between px-6 pt-6">
           <h2 id="group-edit-title" class="text-[20px] font-semibold tracking-tight"
-              x-text="groupEdit.id ? 'แก้กลุ่ม' : 'สร้างกลุ่ม'"></h2>
+              x-text="groupEdit.id ? tr('แก้กลุ่ม') : tr('สร้างกลุ่ม')"></h2>
           <button class="-mr-2 flex h-11 w-11 items-center justify-center rounded-xl hover:bg-[var(--tile-hover)]"
-                  @click="groupEdit.open = false" aria-label="ปิด">
+                  @click="groupEdit.open = false" aria-label="{{ _('ปิดหน้าต่างนี้') }}">
             <svg width="15" height="15" viewBox="0 0 14 14" fill="none" aria-hidden="true">
               <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
             </svg>
@@ -1074,12 +1074,12 @@
         </div>
         <div class="px-6 pt-4">
           <label class="block">
-            <span class="mb-1.5 block text-[14px]">ชื่อกลุ่ม</span>
-            <input class="field" x-model="groupEdit.name" maxlength="60" placeholder="เช่น ไฟชั้นล่าง"
+            <span class="mb-1.5 block text-[14px]">{{ _('ชื่อกลุ่ม') }}</span>
+            <input class="field" x-model="groupEdit.name" maxlength="60" placeholder="{{ _('เช่น ไฟชั้นล่าง') }}"
                    x-init="$nextTick(() => $el.focus())" @keydown.enter="saveGroup()">
           </label>
           <p class="mt-5 text-[14px]">
-            อุปกรณ์ในกลุ่ม <span class="tabular-nums text-[var(--faint)]" x-text="'(' + groupEdit.devices.length + ')'"></span>
+            {{ _('อุปกรณ์ในกลุ่ม') }} <span class="tabular-nums text-[var(--faint)]" x-text="'(' + groupEdit.devices.length + ')'"></span>
           </p>
         </div>
         <div class="mt-1 min-h-0 flex-1 overflow-y-auto px-4">
@@ -1092,7 +1092,7 @@
                          :checked="groupEdit.devices.includes(d.id)" @change="toggleMember(d)">
                   <span class="dev-icon !h-5 !w-5" x-html="devIcon(d)"></span>
                   <span class="min-w-0 flex-1 truncate text-[15px]" x-text="d.name"></span>
-                  <span class="shrink-0 text-[12px] text-[var(--faint)]" x-show="!isSwitchable(d)">อ่านค่าอย่างเดียว</span>
+                  <span class="shrink-0 text-[12px] text-[var(--faint)]" x-show="!isSwitchable(d)">{{ _('อ่านค่าอย่างเดียว') }}</span>
                 </label>
               </template>
             </div>
@@ -1102,10 +1102,10 @@
           <p x-show="groupEdit.error" class="mb-3 text-[14px] text-[var(--danger-text)]" x-text="groupEdit.error"></p>
           <div class="flex flex-wrap items-center gap-2">
             <button class="btn btn-accent" @click="saveGroup()" :disabled="groupEdit.busy"
-                    x-text="groupEdit.busy ? 'กำลังบันทึก…' : 'บันทึก'"></button>
-            <button class="btn" @click="groupEdit.open = false">ยกเลิก</button>
+                    x-text="groupEdit.busy ? tr('กำลังบันทึก…') : tr('บันทึก')"></button>
+            <button class="btn" @click="groupEdit.open = false">{{ _('ยกเลิก') }}</button>
             <template x-if="groupEdit.id">
-              <button class="btn ml-auto text-[var(--danger-text)]" @click="deleteGroup()" :disabled="groupEdit.busy">ลบกลุ่ม</button>
+              <button class="btn ml-auto text-[var(--danger-text)]" @click="deleteGroup()" :disabled="groupEdit.busy">{{ _('ลบกลุ่ม') }}</button>
             </template>
           </div>
         </div>
@@ -1120,9 +1120,9 @@
       <div role="dialog" aria-modal="true" aria-labelledby="settings-title"
            class="pane dense max-h-[92vh] w-full max-w-[420px] overflow-y-auto !rounded-b-none p-6 sm:!rounded-[24px]">
         <div class="flex items-center justify-between">
-          <h2 id="settings-title" class="text-[20px] font-semibold tracking-tight">ตั้งค่า</h2>
+          <h2 id="settings-title" class="text-[20px] font-semibold tracking-tight">{{ _('ตั้งค่า') }}</h2>
           <button class="-mr-2 flex h-11 w-11 items-center justify-center rounded-xl hover:bg-[var(--tile-hover)]"
-                  @click="account.open = false" aria-label="ปิด">
+                  @click="account.open = false" aria-label="{{ _('ปิดหน้าต่างนี้') }}">
             <svg width="15" height="15" viewBox="0 0 14 14" fill="none" aria-hidden="true">
               <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
             </svg>
@@ -1132,69 +1132,78 @@
         <!-- Appearance is per browser: a wall tablet can stay solid while a
              phone uses glass. -->
         <section class="mt-4">
-          <h3 class="text-[14px] font-semibold">การแสดงผล</h3>
+          <h3 class="text-[14px] font-semibold">{{ _('การแสดงผล') }}</h3>
+          <!-- Each language is named in itself, so it can be found by someone
+               who cannot read the other one. Choosing reloads the page. -->
           <div class="mt-3 flex items-center justify-between gap-3">
-            <span class="text-[14px] text-[var(--muted)]">ธีม</span>
-            <div class="seg" role="group" aria-label="ธีม">
-              <button @click="setTheme('dark')" :aria-pressed="theme === 'dark' ? 'true' : 'false'">มืด</button>
-              <button @click="setTheme('light')" :aria-pressed="theme === 'light' ? 'true' : 'false'">สว่าง</button>
+            <span class="text-[14px] text-[var(--muted)]">{{ _('ภาษา') }}</span>
+            <div class="seg" role="group" aria-label="{{ _('ภาษา') }}">
+              <button @click="setLang('th')" lang="th" aria-pressed="{{ 'true' if lang == 'th' else 'false' }}">ไทย</button>
+              <button @click="setLang('en')" lang="en" aria-pressed="{{ 'true' if lang == 'en' else 'false' }}">English</button>
+            </div>
+          </div>
+          <div class="mt-3 flex items-center justify-between gap-3">
+            <span class="text-[14px] text-[var(--muted)]">{{ _('ธีม') }}</span>
+            <div class="seg" role="group" aria-label="{{ _('ธีม') }}">
+              <button @click="setTheme('dark')" :aria-pressed="theme === 'dark' ? 'true' : 'false'">{{ _('มืด') }}</button>
+              <button @click="setTheme('light')" :aria-pressed="theme === 'light' ? 'true' : 'false'">{{ _('สว่าง') }}</button>
             </div>
           </div>
           <div class="mt-4">
             <div class="flex items-baseline justify-between gap-3">
-              <label for="glass-level" class="text-[14px] text-[var(--muted)]">ความใสของกระจก</label>
+              <label for="glass-level" class="text-[14px] text-[var(--muted)]">{{ _('ความใสของกระจก') }}</label>
               <span class="text-[14px] tabular-nums" x-text="glassLabel"></span>
             </div>
             <input id="glass-level" type="range" class="slider" min="0" max="100" step="5"
                    :value="glass" :disabled="!canBlur" @input="setGlass($event.target.value)"
                    style="--track-img: linear-gradient(90deg, var(--track), var(--accent))">
             <div class="flex justify-between text-[12px] text-[var(--faint)]">
-              <span>ทึบ</span><span>ใส</span>
+              <span>{{ _('ทึบ') }}</span><span>{{ _('ใส') }}</span>
             </div>
           </div>
           <p class="mt-2 text-[13px] leading-relaxed text-[var(--faint)]"
-             x-text="canBlur ? 'จอติดผนังหรือมือถือรุ่นเก่า ยิ่งทึบยิ่งลื่น — ตั้งแยกได้ในแต่ละเครื่อง'
-                             : 'เบราว์เซอร์นี้ไม่รองรับเอฟเฟกต์กระจก จึงใช้แบบทึบ'"></p>
+             x-text="canBlur ? tr('จอติดผนังหรือมือถือรุ่นเก่า ยิ่งทึบยิ่งลื่น — ตั้งแยกได้ในแต่ละเครื่อง')
+                             : tr('เบราว์เซอร์นี้ไม่รองรับเอฟเฟกต์กระจก จึงใช้แบบทึบ')"></p>
         </section>
 
         <section class="mt-6 border-t border-[var(--line)] pt-5">
-          <h3 class="text-[14px] font-semibold">เปลี่ยนรหัสผ่าน</h3>
+          <h3 class="text-[14px] font-semibold">{{ _('เปลี่ยนรหัสผ่าน') }}</h3>
           <p class="mt-1 text-[13px] leading-relaxed text-[var(--muted)]">
-            เปลี่ยนแล้วเบราว์เซอร์อื่นทุกเครื่องจะถูกให้ออกจากระบบ ยกเว้นเครื่องนี้
+            {{ _('เปลี่ยนแล้วเบราว์เซอร์อื่นทุกเครื่องจะถูกให้ออกจากระบบ ยกเว้นเครื่องนี้') }}
           </p>
           <div class="mt-3 space-y-3">
             <label class="block">
-              <span class="mb-1.5 block text-[14px]">รหัสผ่านปัจจุบัน</span>
+              <span class="mb-1.5 block text-[14px]">{{ _('รหัสผ่านปัจจุบัน') }}</span>
               <input x-model="account.current" type="password" autocomplete="current-password"
                      :disabled="account.busy" class="field disabled:opacity-50">
             </label>
             <label class="block">
-              <span class="mb-1.5 block text-[14px]">รหัสผ่านใหม่</span>
+              <span class="mb-1.5 block text-[14px]">{{ _('รหัสผ่านใหม่') }}</span>
               <input x-model="account.next" type="password" autocomplete="new-password"
                      :disabled="account.busy" @keydown.enter="changePassword()" class="field disabled:opacity-50">
-              <span class="mt-1.5 block text-[13px] text-[var(--muted)]">อย่างน้อย 10 ตัวอักษร</span>
+              <span class="mt-1.5 block text-[13px] text-[var(--muted)]">{{ _('อย่างน้อย 10 ตัวอักษร') }}</span>
             </label>
           </div>
           <template x-if="account.error">
             <p class="mt-3 text-[14px] text-[var(--danger-text)]" x-text="account.error"></p>
           </template>
           <template x-if="account.done">
-            <p class="mt-3 text-[14px] text-[var(--ok-text)]">เปลี่ยนรหัสผ่านแล้ว</p>
+            <p class="mt-3 text-[14px] text-[var(--ok-text)]">{{ _('เปลี่ยนรหัสผ่านแล้ว') }}</p>
           </template>
           <button class="btn btn-accent mt-4" @click="changePassword()"
                   :disabled="account.busy || !account.current || !account.next">
-            <span x-text="account.busy ? 'กำลังบันทึก…' : 'บันทึกรหัสผ่าน'"></span>
+            <span x-text="account.busy ? tr('กำลังบันทึก…') : tr('บันทึกรหัสผ่าน')"></span>
           </button>
         </section>
 
         <!-- Separate from changing the password: for a phone left signed in
              somewhere, there is no reason to invent a new password. -->
         <section class="mt-6 border-t border-[var(--line)] pt-5">
-          <h3 class="text-[14px] font-semibold">ออกจากระบบ</h3>
+          <h3 class="text-[14px] font-semibold">{{ _('ออกจากระบบ') }}</h3>
           <div class="mt-3 flex flex-wrap gap-2">
-            <button class="btn btn-ghost" @click="logout()" :disabled="loggingOut">ออกจากระบบ</button>
+            <button class="btn btn-ghost" @click="logout()" :disabled="loggingOut">{{ _('ออกจากระบบ') }}</button>
             <button class="btn btn-ghost text-[var(--danger-text)]" @click="logoutAll()" :disabled="loggingOut">
-              ออกจากระบบทุกเครื่อง
+              {{ _('ออกจากระบบทุกเครื่อง') }}
             </button>
           </div>
         </section>

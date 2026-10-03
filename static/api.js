@@ -33,7 +33,7 @@
       response = await fetch(path, opts);
     } catch (err) {
       // Network-level failure: no status, no body.
-      throw new ApiError('ติดต่อเซิร์ฟเวอร์ไม่ได้', 0, {});
+      throw new ApiError(tr('ติดต่อเซิร์ฟเวอร์ไม่ได้'), 0, {});
     }
 
     let body = {};
@@ -56,7 +56,7 @@
       window.dispatchEvent(new CustomEvent('api:precondition', { detail: body }));
     }
 
-    throw new ApiError(body.detail || response.statusText || 'คำขอล้มเหลว', response.status, body);
+    throw new ApiError(body.detail || response.statusText || tr('คำขอล้มเหลว'), response.status, body);
   }
 
   window.apiFetch = apiFetch;

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}เข้าสู่ระบบ · IoT Control Gateway{% endblock %}
+{% block title %}{{ _('เข้าสู่ระบบ · IoT Control Gateway') }}{% endblock %}
 
 {% block head_scripts %}<script src="{{ static_url('login.js') }}"></script>{% endblock %}
 
@@ -16,7 +16,7 @@
       </span>
       <h1 class="text-[22px] font-semibold tracking-tight">IoT Gateway</h1>
       <p class="mt-1 text-[14px] text-[var(--muted)]">
-        {% if setup_needed %}ยังไม่ได้ตั้งรหัสผ่าน{% else %}ใส่รหัสผ่านเพื่อเข้าใช้งาน{% endif %}
+        {% if setup_needed %}{{ _('ยังไม่ได้ตั้งรหัสผ่าน') }}{% else %}{{ _('ใส่รหัสผ่านเพื่อเข้าใช้งาน') }}{% endif %}
       </p>
     </div>
 
@@ -25,11 +25,11 @@
            that lets whoever arrives first choose the password is not much of a
            lock. Same reasoning as commissioning. -->
       <div class="text-[14px] leading-relaxed">
-        <p class="text-[var(--muted)]">สั่งคำสั่งนี้บนเครื่องที่รัน dashboard แล้วรีเฟรชหน้านี้:</p>
+        <p class="text-[var(--muted)]">{{ _('สั่งคำสั่งนี้บนเครื่องที่รัน dashboard แล้วรีเฟรชหน้านี้:') }}</p>
         <pre class="tile mt-3 overflow-x-auto p-3 text-[12px]"><code>docker exec -it iot-app \
   python scripts/set_password.py</code></pre>
         <p class="mt-3 text-[var(--faint)]">
-          จนกว่าจะตั้งรหัสผ่าน dashboard จะไม่ให้เข้าถึงอะไรเลย
+          {{ _('จนกว่าจะตั้งรหัสผ่าน dashboard จะไม่ให้เข้าถึงอะไรเลย') }}
         </p>
       </div>
     {% else %}
@@ -37,11 +37,11 @@
         <!-- autocomplete lets a password manager fill this; there is one
              account, so "current-password" is the honest hint. -->
         <input x-model="password" type="password" autocomplete="current-password"
-               autofocus placeholder="รหัสผ่าน" aria-label="รหัสผ่าน" :disabled="busy"
+               autofocus placeholder="{{ _('รหัสผ่าน') }}" aria-label="{{ _('รหัสผ่าน') }}" :disabled="busy"
                class="field !h-12 disabled:opacity-50">
 
         <button type="submit" :disabled="busy || !password" class="btn btn-accent !h-12 w-full">
-          <span x-text="busy ? 'กำลังตรวจสอบ…' : 'เข้าสู่ระบบ'"></span>
+          <span x-text="busy ? tr('กำลังตรวจสอบ…') : tr('เข้าสู่ระบบ')"></span>
         </button>
 
         <template x-if="error">
@@ -51,7 +51,14 @@
     {% endif %}
 
     <p class="mt-7 text-center text-[13px] text-[var(--faint)]">
-      เข้าถึงได้เฉพาะเครื่องในเครือข่ายที่อนุญาตไว้
+      {{ _('เข้าถึงได้เฉพาะเครื่องในเครือข่ายที่อนุญาตไว้') }}
+    </p>
+    <p x-data class="mt-3 text-center text-[13px]">
+      {% if lang == 'en' %}
+        <button type="button" lang="th" class="text-[var(--muted)] underline-offset-2 hover:underline" @click="setLang('th')">ภาษาไทย</button>
+      {% else %}
+        <button type="button" lang="en" class="text-[var(--muted)] underline-offset-2 hover:underline" @click="setLang('en')">English</button>
+      {% endif %}
     </p>
   </div>
 </div>
