@@ -17,7 +17,8 @@ class Settings(BaseSettings):
     )
 
     # --- device layer -------------------------------------------------------
-    #: "matter" | "tuya" | "hybrid" | "mock"
+    #: "matter" | "tuya" | "toshiba" | "mock", or several joined by commas
+    #: ("matter,toshiba"), the first being primary. "hybrid" = "matter,tuya".
     iot_adapter: str = "mock"
     matter_ws_url: str = "ws://127.0.0.1:5580/ws"
     command_timeout: float = 5.0
@@ -32,6 +33,16 @@ class Settings(BaseSettings):
     tuya_uid: str = ""
     #: Doc §14: never poll Tuya faster than 10s per device.
     tuya_poll_seconds: float = 15.0
+
+    #: Toshiba Home AC Control -- also what Carrier's "Carrier In The Air"
+    #: units in Thailand run on. The same login as the phone app. Only needed
+    #: when iot_adapter includes "toshiba".
+    toshiba_username: str = ""
+    toshiba_password: str = ""
+    #: Where this dashboard keeps the id it registered with Toshiba's cloud
+    #: under. Every client of one account needs its own: two sharing an id
+    #: knock each other off the connection in turn.
+    toshiba_state_path: str = str(ROOT / "data" / "toshiba.json")
 
     # --- storage ------------------------------------------------------------
     #: Empty disables persistence; the app then runs live-only.

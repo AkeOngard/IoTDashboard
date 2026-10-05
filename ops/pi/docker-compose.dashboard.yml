@@ -20,7 +20,13 @@ services:
     # firewall rule on `lo`), and the dashboard lands on the Pi's port 8000.
     network_mode: host
     environment:
-      IOT_ADAPTER: matter
+      # "matter,toshiba" adds air conditioners on Toshiba's cloud (Carrier
+      # In The Air units too) beside the Matter devices; set it in ops/pi/.env
+      # with the two TOSHIBA_ lines below.
+      IOT_ADAPTER: ${IOT_ADAPTER:-matter}
+      # The Toshiba Home AC Control login, the same one as the phone app.
+      TOSHIBA_USERNAME: ${TOSHIBA_USERNAME:-}
+      TOSHIBA_PASSWORD: ${TOSHIBA_PASSWORD:-}
       MATTER_WS_URL: ws://127.0.0.1:5580/ws
       # Empty = history off; the app runs live-only and says so in the header.
       # Set it in .env to a managed Postgres (see DEPLOY-CLOUD.md 2.6) and the

@@ -27,6 +27,7 @@ ABS_DEADBAND: dict[Capability, float] = {
     Capability.BATTERY: 1.0,
     Capability.BRIGHTNESS: 2.0,
     Capability.COLOR_TEMP: 50.0,
+    Capability.OUTDOOR_TEMPERATURE: 0.5,
 }
 
 #: Fractional change, for readings that span orders of magnitude.
@@ -269,6 +270,7 @@ def _to_number(value: Any) -> float | None:
 def _from_number(cap: Capability, value: float) -> Any:
     if cap in BOOLEAN_CAPS:
         return bool(value)
-    if cap in (Capability.BATTERY, Capability.BRIGHTNESS, Capability.COLOR_TEMP):
+    if cap in (Capability.BATTERY, Capability.BRIGHTNESS, Capability.COLOR_TEMP,
+               Capability.TARGET_TEMPERATURE):
         return int(round(value))
     return round(value, 2)

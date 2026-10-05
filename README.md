@@ -145,16 +145,46 @@ IOT_ADAPTER=matter
 MATTER_WS_URL=ws://<ip-ของ-linux-box>:5580/ws
 ```
 
+## แอร์ (Toshiba Home AC Control / Carrier In The Air)
+
+แอร์ที่ต่อ Wi-Fi ผ่านแอป Toshiba Home AC Control ต่อเข้า dashboard ได้ผ่าน cloud ของ Toshiba
+แอร์ Carrier ในไทยที่มี Wi-Fi ในตัว (แอป Carrier In The Air เช่น X-Inverter Plus) ใช้ระบบเดียวกัน —
+ลองล็อกอินแอป **Toshiba Home AC Control** ด้วยบัญชี Carrier ก่อน ถ้าเห็นแอร์ในแอปก็ใช้ได้
+
+```ini
+IOT_ADAPTER=matter,toshiba        # ใช้คู่กับ Matter ได้ ตัวแรกคือตัวหลัก
+TOSHIBA_USERNAME=you@example.com  # บัญชีเดียวกับแอปบนมือถือ
+TOSHIBA_PASSWORD=...
+```
+
+- **แอปบนมือถือและรีโมตยังใช้ได้ปกติ** — dashboard ลงทะเบียนเป็น "มือถืออีกเครื่อง" ในบัญชี
+  และได้สถานะแบบ push ภายในราว 1 วินาที ไม่ว่าจะสั่งจากที่ไหน
+- id ที่ลงทะเบียนเก็บไว้ใน `data/toshiba.json` (`TOSHIBA_STATE_PATH`) — อย่าคัดลอกไฟล์นี้ไปให้ระบบอื่น
+  (เช่น Home Assistant) ที่ใช้บัญชีเดียวกัน ไม่งั้นจะแย่งการเชื่อมต่อกันหลุดสลับไปมา
+- **ต้องมีอินเทอร์เน็ต** (ขาออก 443 และ 8883 ไป Azure IoT Hub) เน็ตหลุดหรือ cloud ล่ม = สั่งแอร์ไม่ได้
+  ส่วนอุปกรณ์ Matter ยังทำงานตามปกติ
+- **ไม่ใช่ API ทางการ** (ไลบรารี [`toshiba-ac`](https://github.com/KaSroka/Toshiba-AC-control)
+  แกะจากแอป) Toshiba เปลี่ยนระบบเมื่อไรอาจใช้ไม่ได้ทันที
+- ใส่รหัสผ่านผิด แอปจะรอ 15 นาทีก่อนลองใหม่ เพื่อไม่ให้บัญชีโดนล็อก
+- กินแรม Pi เพิ่มราว 20 MB และ thread ของ Azure SDK อีก 4 ตัว — import เฉพาะเมื่อเปิด `toshiba`
+- ถ้าสั่งแล้วแอร์ทำงาน แต่หน้าเว็บขึ้นว่าคำสั่งล้มเหลว ให้เพิ่ม `COMMAND_TIMEOUT` เป็น `10`
+
+ที่หน้าอุปกรณ์ของแอร์มี อุณหภูมิที่ตั้ง (17–30°C) โหมด ความแรงลม ทิศทางลม อุณหภูมิในห้องและนอกบ้าน
+โหมดที่แอร์รุ่นนั้นไม่รองรับ (เช่น "ร้อน" ของแอร์ที่ทำความเย็นอย่างเดียว) จะไม่แสดง
+กฎอัตโนมัติสั่งแอร์ได้ด้วย เช่น "22:00 ตั้งอุณหภูมิแอร์ห้องนอนเป็น 26°C"
+
 ## Config (`.env`)
 
 | ตัวแปร | ค่าเริ่มต้น | ความหมาย |
 |---|---|---|
 | `COMPOSE_PROFILES` | *(ว่าง)* | `matter` = รัน matter-server ในเครื่องนี้ · `tunnel` = Cloudflare Tunnel |
-| `IOT_ADAPTER` | `mock` | `matter` · `tuya` · `hybrid` · `mock` |
+| `IOT_ADAPTER` | `mock` | `matter` · `tuya` · `toshiba` · `hybrid` · `mock` · หลายตัวคั่นด้วย comma เช่น `matter,toshiba` |
 | `MATTER_WS_URL` | `ws://127.0.0.1:5580/ws` | endpoint ของ python-matter-server |
 | `COMMAND_TIMEOUT` | `5.0` | วินาทีที่รอ state echo ก่อนถือว่าคำสั่งล้มเหลว |
 | `TUYA_ACCESS_ID` / `_SECRET` / `_UID` | *(ว่าง)* | ใช้เมื่อ adapter เป็น `tuya`/`hybrid` |
 | `TUYA_POLL_SECONDS` | `15` | บังคับขั้นต่ำ 10 วินาที (rate limit) |
+| `TOSHIBA_USERNAME` / `_PASSWORD` | *(ว่าง)* | บัญชี Toshiba Home AC Control ใช้เมื่อ adapter มี `toshiba` |
+| `TOSHIBA_STATE_PATH` | `data/toshiba.json` | id ที่ dashboard ลงทะเบียนกับ cloud ของ Toshiba |
 | `DATABASE_URL` | *(ว่าง)* | เว้นว่าง = ปิด history ทั้งหมด · พอร์ต 6543 (transaction pooler) แอปปิด prepared statement ให้เอง |
 | `HISTORY_RETENTION_DAYS` | `400` | ใช้เฉพาะบน Postgres ธรรมดา · บน TimescaleDB policy ใน migration 005 เป็นคนจัดการ · `0` = ไม่ลบเลย |
 | `TELEMETRY_FLUSH_SECONDS` | `2` | หน่วงก่อน INSERT เป็นชุด · ตั้งสูงขึ้นเมื่อ database อยู่ไกล |

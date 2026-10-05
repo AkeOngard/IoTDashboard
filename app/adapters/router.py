@@ -37,7 +37,16 @@ class DeviceRouter:
     async def start(self, on_state: StateSink, on_status: StatusSink) -> None:
         self._on_status = on_status
         for adapter in self._adapters.values():
+            # The hub hands its "inventory changed" hook to the router, the
+            # only adapter it can see. Without passing it down, a backend that
+            # learns of a device dropping off -- or a cloud that comes back
+            # with the house's devices -- would have no one to tell.
+            adapter.on_devices_changed = self._devices_changed
             await adapter.start(on_state, self._make_status_sink(adapter.name))
+
+    async def _devices_changed(self) -> None:
+        if self.on_devices_changed is not None:
+            await self.on_devices_changed()
 
     async def stop(self) -> None:
         await asyncio.gather(

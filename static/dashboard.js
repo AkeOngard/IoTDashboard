@@ -15,7 +15,7 @@
 function dashboard() {
   return {
     // Readings that deserve the large type.
-    HERO: ['temperature', 'humidity', 'illuminance'],
+    HERO: ['temperature', 'outdoor_temperature', 'humidity', 'illuminance'],
     // Promoted to hero when a device has nothing else to show.
     STATE_READ: ['contact', 'occupancy'],
     READ: ['temperature', 'humidity', 'illuminance', 'battery', 'contact', 'occupancy'],
@@ -26,17 +26,40 @@ function dashboard() {
       temperature: tr('อุณหภูมิ'), humidity: tr('ความชื้น'), illuminance: tr('ความสว่าง'),
       battery: tr('แบตเตอรี่'), contact: tr('หน้าต่าง/ประตู'), occupancy: tr('ตรวจจับคน'),
       brightness: tr('ความสว่างไฟ'), color_temp: tr('โทนแสง'), switch: tr('สวิตช์'),
+      hvac_mode: tr('โหมดแอร์'), target_temperature: tr('อุณหภูมิที่ตั้ง'), fan_mode: tr('ความแรงลม'),
+      swing_mode: tr('ทิศทางลม'), outdoor_temperature: tr('อุณหภูมินอกบ้าน'),
     },
-    UNIT: { brightness: '%', color_temp: 'K' },
+    UNIT: { brightness: '%', color_temp: 'K', target_temperature: '°C' },
+    /* Settings that are one word from a list -- an air conditioner's mode,
+     * fan and louvre -- and what each word is called on screen. A device's own
+     * `choices` says which of them it actually supports. */
+    CHOICE_LABEL: {
+      hvac_mode: { auto: tr('อัตโนมัติ##mode'), cool: tr('เย็น'), heat: tr('ร้อน'), dry: tr('ลดความชื้น'), fan: tr('พัดลม') },
+      fan_mode: {
+        auto: tr('อัตโนมัติ##mode'), quiet: tr('เงียบ'), low: tr('เบา'), medium_low: tr('ค่อนข้างเบา'),
+        medium: tr('กลาง'), medium_high: tr('ค่อนข้างแรง'), high: tr('แรง'),
+      },
+      swing_mode: {
+        off: tr('หยุดนิ่ง'), vertical: tr('ส่ายขึ้นลง'), horizontal: tr('ส่ายซ้ายขวา'), both: tr('ส่ายทุกทิศ'),
+        fixed_1: tr('ตำแหน่ง {n}', { n: 1 }), fixed_2: tr('ตำแหน่ง {n}', { n: 2 }), fixed_3: tr('ตำแหน่ง {n}', { n: 3 }),
+        fixed_4: tr('ตำแหน่ง {n}', { n: 4 }), fixed_5: tr('ตำแหน่ง {n}', { n: 5 }),
+      },
+    },
+    // What an AC's icon glows in, by mode.
+    MODE_COLOR: { cool: 'rgb(98 166 232)', heat: 'rgb(229 111 92)', dry: 'rgb(79 189 232)', fan: 'var(--text)', auto: 'var(--accent-text)' },
+    // Only these get a slider; every other writable setting has its own control.
+    SLIDERS: ['brightness', 'color_temp'],
     CHART_UNIT: {
       temperature: '°C', humidity: '%', illuminance: 'lx', battery: '%',
       brightness: '%', color_temp: 'K', switch: '%', contact: '%', occupancy: '%',
+      target_temperature: '°C', outdoor_temperature: '°C',
     },
     // Chart line colours, matching the reading colours below.
     COLOR: {
       temperature: '230 180 79', humidity: '79 189 232', illuminance: '237 201 92',
       battery: '124 199 102', brightness: '139 124 246', color_temp: '169 139 245',
       switch: '139 124 246', contact: '169 139 245', occupancy: '169 139 245',
+      target_temperature: '98 166 232', outdoor_temperature: '229 111 92',
     },
 
     /* Value → colour ramps. A reading carries its own colour so "too hot" or
@@ -55,7 +78,7 @@ function dashboard() {
     // Endpoints of the Kelvin gradient used by the colour-temperature slider.
     K_WARM: [255, 172, 92],
     K_COOL: [198, 224, 255],
-    RANGE: { brightness: [1, 100, 1], color_temp: [2200, 6500, 100] },
+    RANGE: { brightness: [1, 100, 1], color_temp: [2200, 6500, 100], target_temperature: [17, 30, 1] },
     RANGES: [
       { label: tr('1ชม'), hours: 1 }, { label: tr('6ชม'), hours: 6 },
       { label: tr('24ชม'), hours: 24 }, { label: tr('7วัน'), hours: 168 },
@@ -70,7 +93,10 @@ function dashboard() {
      * than this: a swing worth seeing, like a window opened for ten minutes.
      * Below it the spread is sensor noise, and a band there is just a glow
      * tracing the line. Capabilities not listed use 15% of the chart's span. */
-    SWING: { temperature: 1, humidity: 5, battery: 2, illuminance: 50, brightness: 10, color_temp: 300 },
+    SWING: {
+      temperature: 1, humidity: 5, battery: 2, illuminance: 50, brightness: 10, color_temp: 300,
+      target_temperature: 1, outdoor_temperature: 1,
+    },
     // How many devices the overview shows when none are pinned.
     DEFAULT_PINS: 6,
 
@@ -355,6 +381,19 @@ function dashboard() {
 
     isPending(id, cap) { return this.key(id, cap) in this.pending; },
     isSwitchable(device) { return device.writable.includes('switch'); },
+    isAc(device) { return device.kind === 'ac'; },
+    isChoice(cap) { return cap in this.CHOICE_LABEL; },
+    /** What a reading is called on a device's page. An AC's own thermometer
+     *  reads the room, beside the outdoor one. */
+    capLabel(device, cap) {
+      if (cap === 'temperature' && device && this.isAc(device)) return tr('อุณหภูมิในห้อง');
+      return this.LABEL[cap] || cap;
+    },
+    choiceText(cap, v) { return (this.CHOICE_LABEL[cap] || {})[v] || v; },
+    /** The words a device takes for a choice setting, as it reported them. */
+    choicesFor(device, cap) {
+      return (device && device.choices && device.choices[cap]) || Object.keys(this.CHOICE_LABEL[cap] || {});
+    },
     isOn(device) { return this.shown(device.id, 'switch') === true; },
 
     unit(id, cap) {
@@ -367,6 +406,7 @@ function dashboard() {
       if (v === null || v === undefined) return '—';
       if (cap === 'contact') return v ? tr('ปิดสนิท') : tr('เปิดอยู่##contact');
       if (cap === 'occupancy') return v ? tr('มีคน') : tr('ว่าง');
+      if (this.isChoice(cap)) return this.choiceText(cap, v);
       return typeof v === 'number' ? v.toLocaleString(LOCALE) : v;
     },
 
@@ -392,6 +432,11 @@ function dashboard() {
       const v = this.shown(device.id, 'switch');
       if (v === null || v === undefined) return tr('ไม่ทราบสถานะ');
       if (!v) return tr('ปิดอยู่');
+      if (this.isAc(device)) {
+        const t = this.shown(device.id, 'target_temperature');
+        const mode = this.format(device.id, 'hvac_mode');
+        return typeof t === 'number' ? tr('{mode} · {t}°C', { mode, t }) : mode;
+      }
       const level = this.shown(device.id, 'brightness');
       return typeof level === 'number' ? tr('เปิด · {level}%', { level }) : tr('เปิดอยู่');
     },
@@ -660,7 +705,7 @@ function dashboard() {
       if (cap === 'contact')   return v ? 'var(--text)' : 'var(--warn-text)';   // open is worth noticing
       if (cap === 'occupancy') return v ? 'var(--accent-text)' : 'var(--text)';
       if (this.FLAT[cap]) return this.rgb(this.FLAT[cap]);
-      const stops = this.RAMP[cap];
+      const stops = this.RAMP[cap === 'outdoor_temperature' ? 'temperature' : cap];
       if (stops && typeof v === 'number') return this.rgb(this.ramp(stops, v));
       return 'var(--text)';
     },
@@ -676,6 +721,9 @@ function dashboard() {
       if (!device.online) return '';
       const kind = this.iconKind(device);
       if (kind === 'contact' && this.iconActive(device)) return 'color: var(--warn-text); --glow: .2';
+      if (kind === 'ac' && this.iconActive(device)) {
+        return `color: ${this.MODE_COLOR[this.shown(device.id, 'hvac_mode')] || 'var(--accent-text)'}; --glow: .22`;
+      }
       if (kind === 'climate') {
         const t = this.value(device.id, 'temperature');
         if (typeof t === 'number') return `color: ${this.rgb(this.ramp(this.RAMP.temperature, t))}`;
@@ -705,9 +753,7 @@ function dashboard() {
      * they can read -- a bridge that calls everything a "sensor" still gets a
      * thermometer if it reports temperature. */
     iconKind(device) {
-      if (device.kind === 'light' || device.kind === 'plug' || device.kind === 'switch') {
-        return device.kind;
-      }
+      if (['light', 'plug', 'switch', 'ac'].includes(device.kind)) return device.kind;
       const caps = device.capabilities;
       if (caps.includes('contact')) return 'contact';
       if (caps.includes('occupancy')) return 'occupancy';
@@ -737,7 +783,7 @@ function dashboard() {
     sliderCaps(device) {
       if (!device.online) return [];
       if (this.isSwitchable(device) && !this.isOn(device)) return [];
-      return device.writable.filter(c => c !== 'switch');
+      return device.writable.filter(c => this.SLIDERS.includes(c));
     },
 
     /** Staleness only means something for devices that are supposed to report
@@ -745,6 +791,9 @@ function dashboard() {
      *  `online` (Matter Reachable) is the signal. */
     staleness(device) {
       this._tick; // reactive dependency so this re-renders on the interval
+      // An AC's thermometer is the unit's own and only reports when it moves
+      // a whole degree; whether the unit is reachable is what `online` says.
+      if (this.isAc(device)) return null;
       const sensing = device.capabilities.filter(c => this.READ.includes(c));
       if (!sensing.length) return null;
 
@@ -773,6 +822,15 @@ function dashboard() {
       this.pending[k] = value;
       clearTimeout(this._timers[k]);
       this._timers[k] = setTimeout(() => this.send(device.id, cap, value), 220);
+    },
+
+    /** The AC set point, one degree at a time. Taps are gathered the same way
+     *  as a slider's drag, so five quick taps send one command, not five. */
+    nudge(device, delta) {
+      const [lo, hi] = this.RANGE.target_temperature;
+      const now = this.shown(device.id, 'target_temperature');
+      const next = Math.max(lo, Math.min(hi, (typeof now === 'number' ? now : 25) + delta));
+      if (next !== now) this.slide(device, 'target_temperature', next);
     },
 
     async send(id, cap, value) {
@@ -858,7 +916,10 @@ function dashboard() {
       occupancy: { true: tr('มีคน'), false: tr('ว่าง') },
     },
     // A sensible first value when a number capability is picked.
-    NUMBER_DEFAULT: { temperature: 30, humidity: 70, illuminance: 100, battery: 20, brightness: 100, color_temp: 3000 },
+    NUMBER_DEFAULT: {
+      temperature: 30, humidity: 70, illuminance: 100, battery: 20, brightness: 100, color_temp: 3000,
+      target_temperature: 25, outdoor_temperature: 35,
+    },
     OP_LABEL: { gt: tr('มากกว่า'), lt: tr('น้อยกว่า'), eq: tr('เท่ากับ'), ne: tr('ไม่เท่ากับ') },
 
     isBinary(cap) { return cap in this.BINARY; },
@@ -954,7 +1015,11 @@ function dashboard() {
     fixTest(test) {
       const caps = this.capsFor(test.device, false);
       if (!caps.includes(test.capability)) test.capability = caps[0] || '';
-      if (this.isBinary(test.capability)) {
+      if (this.isChoice(test.capability)) {
+        if (!['eq', 'ne'].includes(test.op)) test.op = 'eq';
+        const words = this.choicesFor(this.deviceById(test.device), test.capability);
+        if (!words.includes(test.value)) test.value = words[0];
+      } else if (this.isBinary(test.capability)) {
         test.op = 'eq';
         if (typeof test.value !== 'boolean') test.value = test.capability !== 'contact';
       } else {
@@ -969,6 +1034,9 @@ function dashboard() {
       if (!caps.includes(action.capability)) action.capability = caps[0] || 'switch';
       if (action.capability === 'switch') {
         if (typeof action.value !== 'boolean') action.value = true;
+      } else if (this.isChoice(action.capability)) {
+        const words = this.choicesFor(this.deviceById(action.device), action.capability);
+        if (!words.includes(action.value)) action.value = words[0];
       } else if (typeof action.value !== 'number') {
         action.value = this.NUMBER_DEFAULT[action.capability] ?? 50;
       }
@@ -1012,6 +1080,11 @@ function dashboard() {
         const word = this.BINARY[t.capability][String(t.value)];
         return t.op === 'ne' ? tr('{name} ไม่{word}', { name, word }) : tr('{name} {word}##is', { name, word });
       }
+      if (this.isChoice(t.capability)) {
+        const what = this.LABEL[t.capability], value = this.choiceText(t.capability, t.value);
+        return t.op === 'ne' ? tr('{name} {what} ไม่ใช่ {value}', { name, what, value })
+                             : tr('{name} {what} เป็น {value}', { name, what, value });
+      }
       return `${name} ${this.LABEL[t.capability] || t.capability} ${this.OP_LABEL[t.op]} ${t.value}${this.CHART_UNIT[t.capability] || ''}`;
     },
 
@@ -1021,8 +1094,12 @@ function dashboard() {
       const d = this.deviceById(a.device);
       const name = d ? d.name : tr('อุปกรณ์ที่หายไป');
       if (a.capability === 'switch') return tr(a.value ? 'เปิด {name}' : 'ปิด {name}', { name });
-      return tr('ตั้ง{what} {name} เป็น {value}',
-        { what: this.LABEL[a.capability], name, value: a.value + (this.UNIT[a.capability] || '') });
+      if (a.capability === 'target_temperature') {
+        return tr('ตั้งอุณหภูมิ {name} เป็น {value}', { name, value: a.value + '°C' });
+      }
+      const value = this.isChoice(a.capability)
+        ? this.choiceText(a.capability, a.value) : a.value + (this.UNIT[a.capability] || '');
+      return tr('ตั้ง{what} {name} เป็น {value}', { what: this.LABEL[a.capability], name, value });
     },
 
     /** The whole rule in one sentence. */
@@ -1204,7 +1281,8 @@ function dashboard() {
     chartCaps(device) {
       if (!device) return [];
       if (this.page === 'overview') return this.CLIMATE.filter(c => device.capabilities.includes(c));
-      return device.capabilities;
+      // A mode is a word, not a line on a chart; history only keeps numbers.
+      return device.capabilities.filter(c => !this.isChoice(c));
     },
 
     /** Point the chart at whatever the page on screen wants charted: the
@@ -1468,6 +1546,10 @@ const ICONS = (() => {
     'dev-climate': svg('<path d="M9.5 13.8V5a2.2 2.2 0 1 1 4.4 0v8.8a4.6 4.6 0 1 1-4.4 0Z"/><path d="M11.7 9.5v6.8" stroke-width="2.6"/>'),
     'dev-lux': svg('<circle class="glow" cx="12" cy="12" r="4.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="4.6"/>'
       + '<g class="rays"><path d="M12 1.8v2.4M12 19.8v2.4M1.8 12h2.4M19.8 12h2.4M4.8 4.8l1.7 1.7M17.5 17.5l1.7 1.7M19.2 4.8l-1.7 1.7M6.5 17.5l-1.7 1.7"/></g>'),
+    // A wall unit: its body glows, the airflow springs out when it runs.
+    'dev-ac': svg('<rect class="glow" x="2.5" y="4.5" width="19" height="9" rx="2.2" fill="currentColor" stroke="none"/>'
+      + '<rect x="2.5" y="4.5" width="19" height="9" rx="2.2"/><path d="M6 10.5h12"/>'
+      + '<g class="rays"><path d="M7.5 16.5c-.6 1.2-.6 2.2 0 3.5M12 16.5v4M16.5 16.5c.6 1.2.6 2.2 0 3.5"/></g>'),
     'dev-sensor': svg('<circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none"/><path d="M6.6 6.6a7.6 7.6 0 0 0 0 10.8M17.4 6.6a7.6 7.6 0 0 1 0 10.8"/>'),
 
     home: svg('<path d="M3.5 10.5 12 3.8l8.5 6.7V20H3.5z"/><circle cx="12" cy="14" r="2.2" fill="currentColor" stroke="none"/>'),
@@ -1487,6 +1569,7 @@ const ICONS = (() => {
     room: svg('<path d="M4 20V9.5L12 4l8 5.5V20"/><path d="M9.5 20v-6h5v6"/>'),
     group: svg('<path d="m12 3.5 8.5 4.3-8.5 4.3-8.5-4.3z"/><path d="m3.5 12 8.5 4.3 8.5-4.3"/><path d="m3.5 16.2 8.5 4.3 8.5-4.3"/>'),
     plus: svg('<path d="M12 5v14M5 12h14"/>'),
+    minus: svg('<path d="M5 12h14"/>'),
     flow: svg('<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.5 6H14a3.5 3.5 0 0 1 3.5 3.5V15.5"/><path d="m15 13 2.5 2.5L20 13"/>'),
     play: svg('<path d="M8 5.5v13l10.5-6.5z"/>'),
     close: svg('<path d="M6 6l12 12M18 6 6 18"/>'),

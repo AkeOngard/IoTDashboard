@@ -19,7 +19,9 @@ from app.adapters.base import DeviceAdapter
 from app.groups import GroupStore
 from app.labels import LabelStore
 from app.models import (
+    CHOICES,
     CONFIRM_TOLERANCE,
+    TARGET_TEMPERATURE_RANGE,
     WRITABLE,
     Capability,
     Command,
@@ -281,6 +283,12 @@ class Hub:
             raise LookupError(device_id + " does not accept writes to " + capability)
 
         value = _coerce(cap, value)
+        allowed = device.choices.get(cap)
+        if allowed and value not in allowed:
+            raise ValueError(
+                "%s does not support %s %r (it takes %s)"
+                % (device.name, cap.value, value, ", ".join(allowed))
+            )
         key = (device_id, cap)
 
         # A newer command supersedes whatever was still in flight for this key.
@@ -416,6 +424,13 @@ def _coerce(cap: Capability, value: Any) -> Any:
         return max(0, min(100, _whole(cap, value)))
     if cap is Capability.COLOR_TEMP:
         return max(1700, min(6500, _whole(cap, value)))
+    if cap is Capability.TARGET_TEMPERATURE:
+        low, high = TARGET_TEMPERATURE_RANGE
+        return max(low, min(high, _whole(cap, value)))
+    if cap in CHOICES:
+        if not isinstance(value, str) or value.lower() not in CHOICES[cap]:
+            raise ValueError("%s must be one of %s" % (cap.value, ", ".join(CHOICES[cap])))
+        return value.lower()
     return value
 
 
