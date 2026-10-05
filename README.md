@@ -154,7 +154,13 @@ MATTER_WS_URL=ws://<ip-ของ-linux-box>:5580/ws
 ```ini
 IOT_ADAPTER=matter,toshiba        # ใช้คู่กับ Matter ได้ ตัวแรกคือตัวหลัก
 TOSHIBA_USERNAME=you@example.com  # บัญชีเดียวกับแอปบนมือถือ
-TOSHIBA_PASSWORD=...
+```
+
+รหัสผ่านไม่ต้องใส่ใน `.env` — เก็บเป็นไฟล์ secret แทน (ดู [รหัสผ่านเป็นไฟล์ secret](#รหัสผ่านเป็นไฟล์-secret)):
+
+```bash
+sudo sh scripts/set_secret.sh toshiba_password      # ถามรหัสโดยไม่แสดงบนจอ
+docker restart iot-app
 ```
 
 - **แอปบนมือถือและรีโมตยังใช้ได้ปกติ** — dashboard ลงทะเบียนเป็น "มือถืออีกเครื่อง" ในบัญชี
@@ -173,6 +179,26 @@ TOSHIBA_PASSWORD=...
 โหมดที่แอร์รุ่นนั้นไม่รองรับ (เช่น "ร้อน" ของแอร์ที่ทำความเย็นอย่างเดียว) จะไม่แสดง
 กฎอัตโนมัติสั่งแอร์ได้ด้วย เช่น "22:00 ตั้งอุณหภูมิแอร์ห้องนอนเป็น 26°C"
 
+## รหัสผ่านเป็นไฟล์ secret
+
+ค่าใดก็ได้ใน config เก็บเป็นไฟล์ของมันเองแทนการใส่ใน `.env` ได้ — ชื่อไฟล์คือชื่อ setting ตัวเล็ก
+(`toshiba_password`, `database_url`, `session_secret`, `tuya_access_secret`) เนื้อไฟล์คือค่า
+
+```bash
+sudo sh scripts/set_secret.sh toshiba_password            # Pi: ops/pi/secrets/
+sudo sh scripts/set_secret.sh database_url secrets        # stack เต็ม: ./secrets/
+docker restart iot-app
+```
+
+- สคริปต์ถามค่าโดยไม่แสดงบนจอ จึงไม่ติดอยู่ใน shell history แล้วยกไฟล์ให้ user ของ container (uid 10001)
+  สิทธิ์ `400` ในโฟลเดอร์ `700` — ผู้ใช้อื่นบน Pi อ่านไม่ได้ จะอ่านกลับต้องใช้ `sudo`
+- container เห็นโฟลเดอร์นี้ที่ `/run/secrets` แบบอ่านอย่างเดียว ค่า**ไม่**ผ่าน environment
+  จึงไม่โผล่ใน `docker inspect`, `docker compose config` และ `/proc/<pid>/environ` อย่างที่ค่าใน `.env` โผล่
+- ไฟล์ secret ชนะค่าใน `.env`/environment เสมอ เมื่อย้ายแล้วให้ลบบรรทัดนั้นออกจาก `.env`
+- โฟลเดอร์ `secrets/` อยู่ใน `.gitignore` แล้ว — `scripts/backup.sh` อ่าน `database_url` จากไฟล์ได้ (ต้องรันด้วย `sudo`)
+- ข้อจำกัด: ใครเป็น root บน Pi ก็ยังอ่านได้ — แอปต้องส่งรหัสตัวจริงให้ Toshiba ทุกครั้งที่ล็อกอิน
+  จึงเข้ารหัสแบบที่ถอดได้เฉพาะแอปไม่ได้ (กุญแจก็ต้องอยู่บนเครื่องเดียวกัน) ช่องว่างหน้า/หลังค่าจะถูกตัดทิ้ง
+
 ## Config (`.env`)
 
 | ตัวแปร | ค่าเริ่มต้น | ความหมาย |
@@ -183,7 +209,8 @@ TOSHIBA_PASSWORD=...
 | `COMMAND_TIMEOUT` | `5.0` | วินาทีที่รอ state echo ก่อนถือว่าคำสั่งล้มเหลว |
 | `TUYA_ACCESS_ID` / `_SECRET` / `_UID` | *(ว่าง)* | ใช้เมื่อ adapter เป็น `tuya`/`hybrid` |
 | `TUYA_POLL_SECONDS` | `15` | บังคับขั้นต่ำ 10 วินาที (rate limit) |
-| `TOSHIBA_USERNAME` / `_PASSWORD` | *(ว่าง)* | บัญชี Toshiba Home AC Control ใช้เมื่อ adapter มี `toshiba` |
+| `TOSHIBA_USERNAME` / `_PASSWORD` | *(ว่าง)* | บัญชี Toshiba Home AC Control ใช้เมื่อ adapter มี `toshiba` · รหัสผ่านควรเก็บเป็นไฟล์ secret |
+| `SECRETS_DIR` | `/run/secrets` | โฟลเดอร์ไฟล์ secret (นอก container ใช้ `./secrets` ด้วย) |
 | `TOSHIBA_STATE_PATH` | `data/toshiba.json` | id ที่ dashboard ลงทะเบียนกับ cloud ของ Toshiba |
 | `DATABASE_URL` | *(ว่าง)* | เว้นว่าง = ปิด history ทั้งหมด · พอร์ต 6543 (transaction pooler) แอปปิด prepared statement ให้เอง |
 | `HISTORY_RETENTION_DAYS` | `400` | ใช้เฉพาะบน Postgres ธรรมดา · บน TimescaleDB policy ใน migration 005 เป็นคนจัดการ · `0` = ไม่ลบเลย |

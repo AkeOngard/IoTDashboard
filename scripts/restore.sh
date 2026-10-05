@@ -32,7 +32,21 @@ if [ -z "${DATABASE_URL:-}" ]; then
     if [ -n "${DATABASE_URL:-}" ]; then break; fi
   done
 fi
-: "${DATABASE_URL:?DATABASE_URL is not set, and neither .env nor ops/pi/.env defines it}"
+# Or kept as a file by scripts/set_secret.sh, out of .env. That file belongs
+# to the container's user, so reading it here takes sudo.
+if [ -z "${DATABASE_URL:-}" ]; then
+  for secret in ops/pi/secrets/database_url secrets/database_url; do
+    if [ -r "$secret" ]; then
+      DATABASE_URL="$(cat "$secret")"
+      break
+    elif [ -e "$secret" ] || { [ -d "${secret%/*}" ] && [ ! -x "${secret%/*}" ]; }; then
+      # Exists but unreadable -- or inside a directory we may not even look in.
+      echo "no DATABASE_URL in .env; ${secret%/*}/ may hold it, but only the app can read it: run this with sudo" >&2
+      exit 1
+    fi
+  done
+fi
+: "${DATABASE_URL:?DATABASE_URL is not set in .env, ops/pi/.env or a secrets/database_url file}"
 PG_EXEC="${PG_EXEC:-}"
 
 # Nothing to dump with? Say so usefully. Raspberry Pi OS does not install the
