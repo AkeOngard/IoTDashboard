@@ -89,9 +89,23 @@ async def main(minutes: float) -> int:
 
     from toshiba_ac.device_manager import ToshibaAcDeviceManager
 
+    from app.adapters.toshiba_adapter import rate_limited
+
     manager = ToshibaAcDeviceManager(settings.toshiba_username, settings.toshiba_password, _probe_id())
     try:
-        await manager.connect()
+        try:
+            await manager.connect()
+        except Exception as exc:  # noqa: BLE001 - say what to do, not a traceback
+            if not rate_limited(exc):
+                raise
+            print(
+                "Toshiba is refusing logins for now (%s): this account logged in too\n"
+                "often lately -- every dashboard restart is a login, and so is each run\n"
+                "of this probe. Leave it alone for 30 minutes, then run this again.\n"
+                "Restarting the dashboard meanwhile only makes the wait longer." % exc,
+                file=sys.stderr,
+            )
+            return 2
         http = manager.http_api
         mapping = await http.request_api(http.AC_MAPPING_PATH, get={"consumerId": http.consumer_id})
         acs = [ac for group in mapping for ac in group.get("ACList", [])]

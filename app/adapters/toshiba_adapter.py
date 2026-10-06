@@ -37,7 +37,7 @@ from toshiba_ac.device.properties import (
     ToshibaAcSwingMode,
 )
 from toshiba_ac.device_manager import ToshibaAcDeviceManager
-from toshiba_ac.utils.http_api import ToshibaAcHttpApiAuthError
+from toshiba_ac.utils.http_api import ToshibaAcHttpApiAuthError, ToshibaAcHttpApiRateLimitError
 
 from app.adapters.base import StateSink, StatusSink
 from app.config import settings
@@ -81,6 +81,10 @@ WATCH_SECONDS = 30.0
 REBUILD_AFTER_SECONDS = 600.0
 #: A wrong password retried every few seconds is how an account gets locked.
 AUTH_RETRY_SECONDS = 900.0
+#: Toshiba answers too many logins with 429 (or 403). Every retry counts as
+#: another login, so trying again soon only keeps the block going -- and it
+#: blocks the phone app's logins on the same account too.
+RATE_LIMIT_RETRY_SECONDS = 900.0
 MAX_BACKOFF_SECONDS = 600.0
 
 
@@ -143,8 +147,13 @@ class ToshibaAdapter:
                 log.error("toshiba login refused (%s); check TOSHIBA_USERNAME/PASSWORD", exc)
                 wait = AUTH_RETRY_SECONDS
             except Exception as exc:  # noqa: BLE001 - any failure means "try again later"
-                log.warning("toshiba cloud unavailable: %s", exc)
-                backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
+                if rate_limited(exc):
+                    log.warning("toshiba is limiting logins (%s); trying again in %d minutes",
+                                exc, RATE_LIMIT_RETRY_SECONDS // 60)
+                    wait = RATE_LIMIT_RETRY_SECONDS
+                else:
+                    log.warning("toshiba cloud unavailable: %s", exc)
+                    backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
             await self._teardown()
             await self._set_connected(False)
             await asyncio.sleep(wait)
@@ -299,6 +308,12 @@ class ToshibaAdapter:
             raise CommandError(str(exc)) from exc
         except Exception as exc:  # noqa: BLE001 - a dropped connection, a timeout
             raise CommandError("Toshiba's cloud did not take the command: %s" % exc) from exc
+
+
+def rate_limited(exc: BaseException) -> bool:
+    """Is this Toshiba saying "too many requests"? The library raises its
+    rate-limit error for 403 only; a 429 comes as a plain API error."""
+    return isinstance(exc, ToshibaAcHttpApiRateLimitError) or "HTTP 429" in str(exc)
 
 
 def _words(members: list[Enum], words: dict[str, str]) -> list[str]:
