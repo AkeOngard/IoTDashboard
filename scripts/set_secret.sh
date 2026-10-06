@@ -28,8 +28,15 @@ if [ "$(id -u)" != 0 ]; then
   exit 1
 fi
 
+# This runs as root and hands things to another user, so never follow a
+# symlink: a link planted at the directory would have chown/chmod land on
+# whatever it points to (/etc, say).
+if [ -L "$dir" ]; then
+  echo "$dir is a symlink; refusing (make it a plain directory)" >&2
+  exit 1
+fi
 mkdir -p "$dir"
-chown "$APP_UID:$APP_UID" "$dir"
+chown -h "$APP_UID:$APP_UID" "$dir"
 chmod 700 "$dir"
 
 # Put the echo back however this ends, Ctrl-C included.
@@ -47,10 +54,14 @@ if [ -z "$value" ]; then
 fi
 
 umask 077
-temp="$dir/.$name.tmp"
+# mktemp creates the file itself (O_EXCL), so no link planted under a
+# guessable name can redirect the write.
+temp="$(mktemp "$dir/.$name.XXXXXX")"
 printf '%s' "$value" > "$temp"
 chown "$APP_UID:$APP_UID" "$temp"
 chmod 400 "$temp"
+# rename() replaces whatever is at the name, a link included, without
+# following it.
 mv -f "$temp" "$dir/$name"
 echo "wrote $dir/$name -- restart the app to use it: docker restart iot-app" >&2
 printf 'then delete the %s line from .env, if there is one\n' "$(echo "$name" | tr '[:lower:]' '[:upper:]')" >&2
