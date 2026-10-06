@@ -104,7 +104,19 @@
               class="capitalize" x-text="(BINARY[{{ t }}.capability] || {}).false"></button>
     </div>
   </template>
-  <template x-if="!isBinary({{ t }}.capability)">
+  <template x-if="isChoice({{ t }}.capability)">
+    <div class="flex items-center gap-2">
+      <select class="field !h-10 !w-auto !text-[15px]" x-model="{{ t }}.op" aria-label="{{ _('เปรียบเทียบ') }}">
+        <option value="eq">{{ _('เป็น') }}</option><option value="ne">{{ _('ไม่ใช่') }}</option>
+      </select>
+      <select class="field !h-10 !w-auto !text-[15px]" x-model="{{ t }}.value" aria-label="{{ _('ค่า') }}">
+        <template x-for="w in choicesFor(deviceById({{ t }}.device), {{ t }}.capability)" :key="w">
+          <option :value="w" :selected="w === {{ t }}.value" x-text="choiceText({{ t }}.capability, w)"></option>
+        </template>
+      </select>
+    </div>
+  </template>
+  <template x-if="!isBinary({{ t }}.capability) && !isChoice({{ t }}.capability)">
     <div class="flex items-center gap-2">
       <select class="field !h-10 !w-auto !text-[15px]" x-model="{{ t }}.op" aria-label="{{ _('เปรียบเทียบ') }}">
         <option value="gt">{{ _('มากกว่า') }}</option><option value="lt">{{ _('น้อยกว่า') }}</option>
@@ -640,11 +652,62 @@
                     </div>
                   </template>
 
+                  <!-- An air conditioner: set point, mode, fan and louvre. Like a
+                       lamp's sliders, they only show while it runs. -->
+                  <template x-if="isAc(detail) && detail.online && isOn(detail)">
+                    <div class="flex flex-col gap-4">
+                      <div class="flex items-center justify-between gap-4"
+                           :class="isPending(detail.id, 'target_temperature') && 'is-pending'">
+                        <div>
+                          <p class="text-[13px] text-[var(--faint)]" x-text="LABEL.target_temperature"></p>
+                          <p class="mt-0.5 text-[30px] font-medium leading-tight tabular-nums">
+                            <span x-text="shown(detail.id, 'target_temperature') ?? '—'"></span><span
+                              class="ml-0.5 text-[15px] font-normal text-[var(--faint)]">°C</span>
+                          </p>
+                        </div>
+                        <div class="flex gap-2">
+                          <button class="btn btn-ghost !h-11 !w-11 !p-0" @click="nudge(detail, -1)"
+                                  :disabled="shown(detail.id, 'target_temperature') <= RANGE.target_temperature[0]"
+                                  :aria-label="tr('ลดอุณหภูมิ') + ' ' + detail.name">
+                            <span class="ic h-5 w-5" x-html="icon('minus')"></span>
+                          </button>
+                          <button class="btn btn-ghost !h-11 !w-11 !p-0" @click="nudge(detail, 1)"
+                                  :disabled="shown(detail.id, 'target_temperature') >= RANGE.target_temperature[1]"
+                                  :aria-label="tr('เพิ่มอุณหภูมิ') + ' ' + detail.name">
+                            <span class="ic h-5 w-5" x-html="icon('plus')"></span>
+                          </button>
+                        </div>
+                      </div>
+                      <div :class="isPending(detail.id, 'hvac_mode') && 'is-pending'">
+                        <p class="mb-1.5 text-[13px] text-[var(--faint)]" x-text="LABEL.hvac_mode"></p>
+                        <div class="seg no-scrollbar max-w-full overflow-x-auto" role="group" :aria-label="LABEL.hvac_mode">
+                          <template x-for="w in choicesFor(detail, 'hvac_mode')" :key="w">
+                            <button @click="send(detail.id, 'hvac_mode', w)"
+                                    :aria-pressed="shown(detail.id, 'hvac_mode') === w ? 'true' : 'false'"
+                                    x-text="choiceText('hvac_mode', w)"></button>
+                          </template>
+                        </div>
+                      </div>
+                      <div class="grid grid-cols-2 gap-3">
+                        <template x-for="cap in ['fan_mode', 'swing_mode']" :key="cap">
+                          <label class="block" :class="isPending(detail.id, cap) && 'is-pending'">
+                            <span class="mb-1.5 block text-[13px] text-[var(--faint)]" x-text="LABEL[cap]"></span>
+                            <select class="field !h-10 !text-[15px]" @change="send(detail.id, cap, $event.target.value)">
+                              <template x-for="w in choicesFor(detail, cap)" :key="w">
+                                <option :value="w" :selected="shown(detail.id, cap) === w" x-text="choiceText(cap, w)"></option>
+                              </template>
+                            </select>
+                          </label>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+
                   <template x-if="heroCaps(detail).length">
                     <div class="grid grid-cols-2 gap-4">
                       <template x-for="cap in heroCaps(detail)" :key="cap">
                         <div>
-                          <p class="text-[13px] text-[var(--faint)]" x-text="LABEL[cap] || cap"></p>
+                          <p class="text-[13px] text-[var(--faint)]" x-text="capLabel(detail, cap)"></p>
                           <p class="mt-0.5 text-[30px] font-medium leading-tight tabular-nums"
                              :style="'color: ' + readingColor(detail.id, cap)">
                             <span x-text="format(detail.id, cap)"></span><span
@@ -928,7 +991,14 @@
                                   <button type="button" @click="a.value = false" :aria-pressed="a.value === false ? 'true' : 'false'">{{ _('ปิด') }}</button>
                                 </div>
                               </template>
-                              <template x-if="a.capability !== 'switch'">
+                              <template x-if="isChoice(a.capability)">
+                                <select class="field !h-10 !w-auto !text-[15px]" x-model="a.value" aria-label="{{ _('ค่า') }}">
+                                  <template x-for="w in choicesFor(deviceById(a.device), a.capability)" :key="w">
+                                    <option :value="w" :selected="w === a.value" x-text="choiceText(a.capability, w)"></option>
+                                  </template>
+                                </select>
+                              </template>
+                              <template x-if="a.capability !== 'switch' && !isChoice(a.capability)">
                                 <div class="flex items-center gap-2">
                                   <input type="number" class="field !h-10 !w-24 !text-[15px]" x-model.number="a.value" aria-label="{{ _('ค่า') }}"
                                          :min="RANGE[a.capability] ? RANGE[a.capability][0] : null" :max="RANGE[a.capability] ? RANGE[a.capability][1] : null">

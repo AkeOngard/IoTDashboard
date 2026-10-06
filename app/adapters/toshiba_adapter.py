@@ -1,0 +1,314 @@
+"""Toshiba Home AC Control adapter -- air conditioners through Toshiba's cloud.
+
+Also the way into Carrier units sold in Thailand with built-in Wi-Fi (the
+"Carrier In The Air" app): they run on the same service, and the same login
+works in Toshiba's app.
+
+How it talks, via the `toshiba-ac` library: log in with the phone app's
+account, register this dashboard as one more "mobile device" on it, and hold
+an Azure IoT Hub connection that the AC pushes its state over and takes
+commands from. No polling -- a change made on the remote or in the phone app
+arrives here within a second or so, and the phone app keeps working exactly
+as before.
+
+Not an official API. It is what the phone app speaks, worked out from the
+outside, so Toshiba can change it under us; and it needs the internet, so
+unlike Matter it stops when the connection to the house does. Both are why
+this is a separate adapter beside Matter rather than a replacement for it.
+"""
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import json
+import logging
+import os
+import secrets
+import time
+from enum import Enum
+from pathlib import Path
+from typing import Any
+
+from toshiba_ac.device import ToshibaAcDevice, ToshibaAcDeviceError
+from toshiba_ac.device.properties import (
+    ToshibaAcFanMode,
+    ToshibaAcMode,
+    ToshibaAcStatus,
+    ToshibaAcSwingMode,
+)
+from toshiba_ac.device_manager import ToshibaAcDeviceManager
+from toshiba_ac.utils.http_api import ToshibaAcHttpApiAuthError
+
+from app.adapters.base import StateSink, StatusSink
+from app.config import settings
+from app.models import Capability, Command, CommandError, Device, StateEvent
+
+log = logging.getLogger(__name__)
+
+# The library logs every state change at INFO and the Azure SDK narrates its
+# connection; on a Pi writing to an SD card neither is worth keeping.
+for _noisy in ("toshiba_ac", "azure.iot.device"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+
+CAPABILITIES = [
+    Capability.SWITCH,
+    Capability.HVAC_MODE,
+    Capability.TARGET_TEMPERATURE,
+    Capability.FAN_MODE,
+    Capability.SWING_MODE,
+    Capability.TEMPERATURE,
+    Capability.OUTDOOR_TEMPERATURE,
+]
+
+#: Library enum member name -> the word the rest of the app uses.
+MODE_WORDS = {"AUTO": "auto", "COOL": "cool", "HEAT": "heat", "DRY": "dry", "FAN": "fan"}
+FAN_WORDS = {
+    "AUTO": "auto", "QUIET": "quiet", "LOW": "low", "MEDIUM_LOW": "medium_low",
+    "MEDIUM": "medium", "MEDIUM_HIGH": "medium_high", "HIGH": "high",
+}
+SWING_WORDS = {
+    "OFF": "off", "SWING_VERTICAL": "vertical", "SWING_HORIZONTAL": "horizontal",
+    "SWING_VERTICAL_AND_HORIZONTAL": "both",
+    "FIXED_1": "fixed_1", "FIXED_2": "fixed_2", "FIXED_3": "fixed_3",
+    "FIXED_4": "fixed_4", "FIXED_5": "fixed_5",
+}
+
+#: How often to look at the cloud connection. The SDK reconnects by itself;
+#: this only mirrors its state onto the dashboard.
+WATCH_SECONDS = 30.0
+#: Down this long, and the session is rebuilt from a fresh login -- the
+#: cloud may have forgotten our registration, or the token may be stale.
+REBUILD_AFTER_SECONDS = 600.0
+#: A wrong password retried every few seconds is how an account gets locked.
+AUTH_RETRY_SECONDS = 900.0
+MAX_BACKOFF_SECONDS = 600.0
+
+
+class ToshibaAdapter:
+    name = "toshiba"
+    on_devices_changed = None
+
+    def __init__(self) -> None:
+        self._username = settings.toshiba_username
+        self._password = settings.toshiba_password
+        self._state_path = Path(settings.toshiba_state_path) if settings.toshiba_state_path else None
+        self._manager: ToshibaAcDeviceManager | None = None
+        self._acs: dict[str, ToshibaAcDevice] = {}
+        self._devices: dict[str, Device] = {}
+        self._on_state: StateSink | None = None
+        self._on_status: StatusSink | None = None
+        self._task: asyncio.Task | None = None
+        self._connected = False
+
+    @property
+    def configured(self) -> bool:
+        return bool(self._username and self._password)
+
+    # ------------------------------------------------------------------ life
+
+    async def start(self, on_state: StateSink, on_status: StatusSink) -> None:
+        self._on_state, self._on_status = on_state, on_status
+        if not self.configured:
+            log.warning("toshiba adapter is not configured (TOSHIBA_USERNAME/PASSWORD); staying idle")
+            await on_status(False)
+            return
+        # Connecting takes a login, a registration and an IoT Hub handshake --
+        # seconds over the internet. Never hold up the dashboard's start for it.
+        self._task = asyncio.create_task(self._run())
+
+    async def stop(self) -> None:
+        if self._task:
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+        await self._teardown()
+
+    async def discover(self) -> list[Device]:
+        return list(self._devices.values())
+
+    # ------------------------------------------------------------ connection
+
+    async def _run(self) -> None:
+        backoff = 10.0
+        while True:
+            wait = backoff
+            try:
+                await self._connect()
+                backoff = 10.0
+                await self._watch()
+                log.warning("toshiba cloud connection stayed down; logging in again")
+            except asyncio.CancelledError:
+                raise
+            except ToshibaAcHttpApiAuthError as exc:
+                log.error("toshiba login refused (%s); check TOSHIBA_USERNAME/PASSWORD", exc)
+                wait = AUTH_RETRY_SECONDS
+            except Exception as exc:  # noqa: BLE001 - any failure means "try again later"
+                log.warning("toshiba cloud unavailable: %s", exc)
+                backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
+            await self._teardown()
+            await self._set_connected(False)
+            await asyncio.sleep(wait)
+
+    async def _connect(self) -> None:
+        self._manager = ToshibaAcDeviceManager(self._username, self._password, self._client_id())
+        await self._manager.connect()
+        acs = await self._manager.get_devices()
+
+        self._acs, self._devices = {}, {}
+        for ac in acs:
+            device_id = "toshiba:" + ac.ac_unique_id
+            self._acs[device_id] = ac
+            self._devices[device_id] = Device(
+                id=device_id,
+                name=ac.name or "Air conditioner",
+                room="Unassigned",
+                adapter=self.name,
+                native_id=ac.ac_unique_id,
+                kind="ac",
+                capabilities=list(CAPABILITIES),
+                choices={
+                    Capability.HVAC_MODE: _words(ac.supported.ac_mode, MODE_WORDS),
+                    Capability.FAN_MODE: _words(ac.supported.ac_fan_mode, FAN_WORDS),
+                    Capability.SWING_MODE: _words(ac.supported.ac_swing_mode, SWING_WORDS),
+                },
+            )
+            ac.on_state_changed_callback.add(self._state_changed)
+        log.info("toshiba cloud connected: %d air conditioner(s)", len(acs))
+
+        await self._set_connected(True)
+        for ac in acs:
+            await self._state_changed(ac)
+
+    async def _watch(self) -> None:
+        """Mirror the SDK's connection state until it has been down too long."""
+        down_since: float | None = None
+        while True:
+            await asyncio.sleep(WATCH_SECONDS)
+            client = getattr(getattr(self._manager, "amqp_api", None), "device", None)
+            up = bool(client is not None and client.connected)
+            await self._set_connected(up)
+            if up:
+                down_since = None
+            elif down_since is None:
+                down_since = time.monotonic()
+            elif time.monotonic() - down_since > REBUILD_AFTER_SECONDS:
+                return
+
+    async def _teardown(self) -> None:
+        manager, self._manager = self._manager, None
+        for ac in self._acs.values():
+            ac.on_state_changed_callback.remove(self._state_changed)
+        if manager is not None:
+            with contextlib.suppress(Exception):
+                await manager.shutdown()
+
+    async def _set_connected(self, connected: bool) -> None:
+        if connected == self._connected:
+            return
+        self._connected = connected
+        for device in self._devices.values():
+            device.online = connected
+        if self._on_status is not None:
+            await self._on_status(connected)
+        if self.on_devices_changed is not None:
+            await self.on_devices_changed()
+
+    def _client_id(self) -> str:
+        """Our own id among the account's "mobile devices", kept across restarts.
+
+        The library falls back to one fixed id for everyone, so this dashboard
+        and, say, a Home Assistant on the same account would keep knocking
+        each other off the connection.
+        """
+        stored = self._read_state().get("client_id")
+        if isinstance(stored, str) and stored:
+            return stored
+        client_id = secrets.token_hex(8)
+        if self._state_path is None:
+            log.warning("TOSHIBA_STATE_PATH is empty; registering under a new id every start")
+            return client_id
+        try:
+            self._state_path.parent.mkdir(parents=True, exist_ok=True)
+            temp = self._state_path.with_name(self._state_path.name + ".tmp")
+            temp.write_text(json.dumps({"version": 1, "client_id": client_id}), encoding="utf-8")
+            os.replace(temp, self._state_path)
+        except OSError as exc:
+            log.warning("could not save the toshiba client id to %s: %s", self._state_path, exc)
+        return client_id
+
+    def _read_state(self) -> dict[str, Any]:
+        if self._state_path is None:
+            return {}
+        try:
+            data = json.loads(self._state_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError) as exc:
+            log.warning("ignoring unreadable %s: %s", self._state_path, exc)
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    # ----------------------------------------------------------------- state
+
+    async def _state_changed(self, ac: ToshibaAcDevice) -> None:
+        """Publish everything the AC reports. The hub drops repeats."""
+        if self._on_state is None:
+            return
+        device_id = "toshiba:" + ac.ac_unique_id
+        if device_id not in self._devices:
+            return
+        status = ac.ac_status
+        readings: list[tuple[Capability, Any]] = [
+            (Capability.SWITCH, None if status is ToshibaAcStatus.NONE else status is ToshibaAcStatus.ON),
+            (Capability.HVAC_MODE, MODE_WORDS.get(ac.ac_mode.name)),
+            (Capability.TARGET_TEMPERATURE, ac.ac_temperature),
+            (Capability.FAN_MODE, FAN_WORDS.get(ac.ac_fan_mode.name)),
+            (Capability.SWING_MODE, SWING_WORDS.get(ac.ac_swing_mode.name)),
+            (Capability.TEMPERATURE, ac.ac_indoor_temperature),
+            (Capability.OUTDOOR_TEMPERATURE, ac.ac_outdoor_temperature),
+        ]
+        for cap, value in readings:
+            if value is not None:
+                await self._on_state(StateEvent(device_id, cap, value))
+
+    # ---------------------------------------------------------------- writes
+
+    async def execute(self, command: Command) -> None:
+        ac = self._acs.get(command.device_id)
+        if ac is None:
+            raise CommandError("air conditioner is not known to Toshiba's cloud")
+        if not self._connected:
+            raise CommandError("not connected to Toshiba's cloud")
+        cap, value = command.capability, command.value
+        try:
+            if cap is Capability.SWITCH:
+                await ac.set_ac_status(ToshibaAcStatus.ON if value else ToshibaAcStatus.OFF)
+            elif cap is Capability.HVAC_MODE:
+                await ac.set_ac_mode(_member(ToshibaAcMode, MODE_WORDS, value))
+            elif cap is Capability.TARGET_TEMPERATURE:
+                await ac.set_ac_temperature(int(value))
+            elif cap is Capability.FAN_MODE:
+                await ac.set_ac_fan_mode(_member(ToshibaAcFanMode, FAN_WORDS, value))
+            elif cap is Capability.SWING_MODE:
+                await ac.set_ac_swing_mode(_member(ToshibaAcSwingMode, SWING_WORDS, value))
+            else:
+                raise CommandError("capability " + cap.value + " is not writable over Toshiba")
+        except CommandError:
+            raise
+        except (ToshibaAcDeviceError, ValueError) as exc:
+            raise CommandError(str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 - a dropped connection, a timeout
+            raise CommandError("Toshiba's cloud did not take the command: %s" % exc) from exc
+
+
+def _words(members: list[Enum], words: dict[str, str]) -> list[str]:
+    """The app's words for the members a model supports, in the app's order."""
+    names = {m.name for m in members}
+    return [word for name, word in words.items() if name in names]
+
+
+def _member(enum: type[Enum], words: dict[str, str], word: Any) -> Enum:
+    for name, w in words.items():
+        if w == word:
+            return enum[name]
+    raise ValueError("unknown value %r" % word)

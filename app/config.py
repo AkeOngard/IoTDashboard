@@ -1,9 +1,10 @@
 """Settings, per the documented ENV contract (Quick Reference §17)."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = ROOT / "templates"
@@ -11,13 +12,56 @@ STATIC_DIR = ROOT / "static"
 MIGRATIONS_DIR = ROOT / "migrations"
 
 
+def _secrets_dirs() -> list[Path]:
+    """Where a setting may live as a file of its own instead of in .env.
+
+    A file named after the setting -- `toshiba_password`, `database_url` --
+    holds its value and nothing else. Inside the container that is the
+    read-only /run/secrets mount; running uvicorn on the host, ./secrets.
+    Only directories that exist are passed on: pydantic warns about the rest.
+
+    Why bother: an environment variable is on show to anyone who can run
+    `docker inspect` or `docker compose config`, and in /proc/<pid>/environ.
+    A file readable only by the app's user is not.
+    """
+    candidates = [Path(os.environ.get("SECRETS_DIR", "/run/secrets")), ROOT / "secrets"]
+    # One we may not read is skipped, not fatal: scripts/set_secret.sh hands
+    # the directory to the container's user, so `make migrate` on the host
+    # sees it but cannot open it -- and must still start.
+    return [p for p in dict.fromkeys(candidates) if _readable_dir(p)]
+
+
+def _readable_dir(path: Path) -> bool:
+    try:
+        return path.is_dir() and os.access(path, os.R_OK | os.X_OK)
+    except OSError:     # a parent we may not enter
+        return False
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=ROOT / ".env", env_file_encoding="utf-8", extra="ignore"
+        env_file=ROOT / ".env", env_file_encoding="utf-8", extra="ignore",
+        secrets_dir=_secrets_dirs() or None,
     )
 
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # A secret file wins over the environment, not the other way round as
+        # pydantic has it: compose passes `TOSHIBA_PASSWORD: ${TOSHIBA_PASSWORD:-}`,
+        # an empty string, whenever .env leaves it out -- and that empty
+        # string would otherwise mask the file that was put there on purpose.
+        return init_settings, file_secret_settings, env_settings, dotenv_settings
+
     # --- device layer -------------------------------------------------------
-    #: "matter" | "tuya" | "hybrid" | "mock"
+    #: "matter" | "tuya" | "toshiba" | "mock", or several joined by commas
+    #: ("matter,toshiba"), the first being primary. "hybrid" = "matter,tuya".
     iot_adapter: str = "mock"
     matter_ws_url: str = "ws://127.0.0.1:5580/ws"
     command_timeout: float = 5.0
@@ -32,6 +76,16 @@ class Settings(BaseSettings):
     tuya_uid: str = ""
     #: Doc §14: never poll Tuya faster than 10s per device.
     tuya_poll_seconds: float = 15.0
+
+    #: Toshiba Home AC Control -- also what Carrier's "Carrier In The Air"
+    #: units in Thailand run on. The same login as the phone app. Only needed
+    #: when iot_adapter includes "toshiba".
+    toshiba_username: str = ""
+    toshiba_password: str = ""
+    #: Where this dashboard keeps the id it registered with Toshiba's cloud
+    #: under. Every client of one account needs its own: two sharing an id
+    #: knock each other off the connection in turn.
+    toshiba_state_path: str = str(ROOT / "data" / "toshiba.json")
 
     # --- storage ------------------------------------------------------------
     #: Empty disables persistence; the app then runs live-only.

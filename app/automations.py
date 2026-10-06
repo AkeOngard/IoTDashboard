@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from app.labels import clean
-from app.models import WRITABLE, Capability, CommandError, StateEvent
+from app.models import CHOICES, WRITABLE, Capability, CommandError, StateEvent
 
 log = logging.getLogger(__name__)
 
@@ -89,6 +89,13 @@ def _number_or_bool(value: Any) -> bool | float:
     raise ValueError("a value must be true, false or a number")
 
 
+def _choice(cap: Capability, value: Any) -> str:
+    """One of the words a CHOICES capability takes, such as an AC's "cool"."""
+    if not isinstance(value, str) or value not in CHOICES[cap]:
+        raise ValueError("%s takes one of %s" % (cap.value, ", ".join(CHOICES[cap])))
+    return value
+
+
 def _test(body: Any, field: str) -> dict[str, Any]:
     """A device test: {device, capability, op, value}."""
     if not isinstance(body, dict):
@@ -100,6 +107,11 @@ def _test(body: Any, field: str) -> dict[str, Any]:
     op = body.get("op", "eq")
     if op not in OPS:
         raise ValueError("%s op must be one of %s" % (field, ", ".join(OPS)))
+    if cap in CHOICES:
+        if op not in ("eq", "ne"):
+            raise ValueError("%s can only be tested for being or not being a value" % cap.value)
+        value = _choice(cap, body.get("value"))
+        return {"device": _device_id(body.get("device")), "capability": cap.value, "op": op, "value": value}
     value = _number_or_bool(body.get("value"))
     if op in ("gt", "lt") and isinstance(value, bool):
         raise ValueError(field + " compares above/below a number, not true/false")
@@ -144,9 +156,12 @@ def _action(body: Any) -> dict[str, Any]:
             raise ValueError("unknown capability %r" % body.get("capability")) from None
         if cap not in WRITABLE:
             raise ValueError("%s cannot be set" % cap.value)
-        value = _number_or_bool(body.get("value"))
-        if (cap is Capability.SWITCH) != isinstance(value, bool):
-            raise ValueError("switch takes true/false; brightness and colour temperature take a number")
+        if cap in CHOICES:
+            value = _choice(cap, body.get("value"))
+        else:
+            value = _number_or_bool(body.get("value"))
+            if (cap is Capability.SWITCH) != isinstance(value, bool):
+                raise ValueError("switch takes true/false; other settings take a number")
         return {"type": kind, "device": _device_id(body.get("device")), "capability": cap.value, "value": value}
     if kind == "group":
         group = body.get("group")
@@ -199,6 +214,10 @@ def compare(op: str, actual: Any, expected: Any) -> bool:
         if isinstance(actual, bool) or not isinstance(actual, (int, float)):
             return False
         return actual > expected if op == "gt" else actual < expected
+    if isinstance(expected, str):
+        # A choice such as an AC mode: the same word or not.
+        same = actual == expected
+        return same if op == "eq" else not same
     same = actual == expected if isinstance(expected, bool) else (
         isinstance(actual, (int, float)) and not isinstance(actual, bool) and abs(actual - expected) < 1e-9)
     return same if op == "eq" else not same

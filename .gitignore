@@ -5,3 +5,5 @@ venv/
 .env
 matter-data/
 data/
+# One file per password, written by scripts/set_secret.sh.
+secrets/

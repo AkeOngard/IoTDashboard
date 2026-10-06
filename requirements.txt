@@ -7,3 +7,7 @@ pydantic-settings>=2.4
 # Time-zone data for automation time rules: the slim image has none, and
 # without it "Asia/Bangkok" cannot be looked up. Pure Python, no build.
 tzdata>=2024.1
+# Toshiba Home AC Control (and Carrier In The Air). Pinned exactly: it pins a
+# pre-release Azure IoT SDK itself, and an unofficial API is no place for
+# surprise upgrades. Imported only when IOT_ADAPTER includes "toshiba".
+toshiba-ac==0.3.13

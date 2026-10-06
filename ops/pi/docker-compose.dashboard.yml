@@ -20,7 +20,14 @@ services:
     # firewall rule on `lo`), and the dashboard lands on the Pi's port 8000.
     network_mode: host
     environment:
-      IOT_ADAPTER: matter
+      # "matter,toshiba" adds air conditioners on Toshiba's cloud (Carrier
+      # In The Air units too) beside the Matter devices; set it in ops/pi/.env.
+      IOT_ADAPTER: ${IOT_ADAPTER:-matter}
+      # The Toshiba Home AC Control login, the same one as the phone app.
+      # The password is deliberately not passed here: an environment variable
+      # shows in `docker inspect`. It goes in a file instead --
+      #   sudo sh scripts/set_secret.sh toshiba_password
+      TOSHIBA_USERNAME: ${TOSHIBA_USERNAME:-}
       MATTER_WS_URL: ws://127.0.0.1:5580/ws
       # Empty = history off; the app runs live-only and says so in the header.
       # Set it in .env to a managed Postgres (see DEPLOY-CLOUD.md 2.6) and the
@@ -45,6 +52,10 @@ services:
       # The names you give devices in the dashboard. The M1 only reports its
       # own product labels, so this is where "โคมห้องนอน" actually lives.
       - app-data:/app/data
+      # Passwords kept out of .env and out of the environment, one file per
+      # setting (scripts/set_secret.sh). Read-only, and readable by the app's
+      # user alone. Docker makes an empty directory here if there is none.
+      - ./secrets:/run/secrets:ro
     tmpfs:
       - /tmp
     security_opt:

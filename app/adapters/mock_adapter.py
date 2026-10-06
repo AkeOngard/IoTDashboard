@@ -37,6 +37,13 @@ def _devices() -> list[Device]:
                [Capability.TEMPERATURE, Capability.HUMIDITY, Capability.BATTERY]),
         Device("mock:6", "Window Contact", "Office", "mock", "6", "sensor",
                [Capability.CONTACT, Capability.BATTERY]),
+        # Shaped like a Carrier X-Inverter Plus over Toshiba's cloud: cooling
+        # only, as the Thai models are.
+        Device("mock:7", "Air Conditioner", "Bedroom", "mock", "7", "ac",
+               [Capability.SWITCH, Capability.HVAC_MODE, Capability.TARGET_TEMPERATURE,
+                Capability.FAN_MODE, Capability.SWING_MODE, Capability.TEMPERATURE,
+                Capability.OUTDOOR_TEMPERATURE],
+               choices={Capability.HVAC_MODE: ["auto", "cool", "dry", "fan"]}),
     ]
 
 
@@ -61,6 +68,13 @@ class MockAdapter:
             ("mock:5", Capability.BATTERY): 78,
             ("mock:6", Capability.CONTACT): True,
             ("mock:6", Capability.BATTERY): 64,
+            ("mock:7", Capability.SWITCH): False,
+            ("mock:7", Capability.HVAC_MODE): "cool",
+            ("mock:7", Capability.TARGET_TEMPERATURE): 25,
+            ("mock:7", Capability.FAN_MODE): "auto",
+            ("mock:7", Capability.SWING_MODE): "off",
+            ("mock:7", Capability.TEMPERATURE): 29.0,
+            ("mock:7", Capability.OUTDOOR_TEMPERATURE): 34.0,
         }
         self._on_state: StateSink | None = None
         self._task: asyncio.Task | None = None
@@ -107,6 +121,7 @@ class MockAdapter:
     async def _drift(self) -> None:
         while True:
             await asyncio.sleep(SENSOR_PERIOD)
+            await self._cool_room()
             for device_id in ("mock:4", "mock:5"):
                 for cap, span, lo, hi, digits in (
                     (Capability.TEMPERATURE, 0.3, 15.0, 40.0, 1),
@@ -117,6 +132,19 @@ class MockAdapter:
                     nudged = min(hi, max(lo, current + random.uniform(-span, span)))
                     self._state[key] = round(nudged, digits)
                     await self._emit(key)
+
+    async def _cool_room(self) -> None:
+        """The room drifts toward the set point while the AC cools, and back
+        up toward the outdoors while it is off."""
+        room = ("mock:7", Capability.TEMPERATURE)
+        current = float(self._state[room])  # type: ignore[arg-type]
+        cooling = self._state[("mock:7", Capability.SWITCH)] and self._state[("mock:7", Capability.HVAC_MODE)] != "fan"
+        goal = float(self._state[("mock:7", Capability.TARGET_TEMPERATURE)] if cooling  # type: ignore[arg-type]
+                     else self._state[("mock:7", Capability.OUTDOOR_TEMPERATURE)])
+        step = max(-0.3, min(0.3, goal - current))
+        if abs(step) >= 0.05:
+            self._state[room] = round(current + step, 1)
+            await self._emit(room)
 
     async def _emit(self, key: tuple[str, Capability]) -> None:
         if self._on_state is None:

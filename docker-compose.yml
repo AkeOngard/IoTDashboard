@@ -66,6 +66,10 @@ services:
       # Device names the operator typed in. Small, but losing it means naming
       # every device again.
       - app-data:/app/data
+      # Settings kept as files instead of in .env, e.g. toshiba_password
+      # (sudo sh scripts/set_secret.sh toshiba_password secrets). Read before
+      # .env, and never shown by `docker inspect`.
+      - ./secrets:/run/secrets:ro
     ports:
       # APP_BIND=127.0.0.1 keeps the dashboard off every interface except
       # loopback -- the cloud setup publishes it through `tailscale serve`.
