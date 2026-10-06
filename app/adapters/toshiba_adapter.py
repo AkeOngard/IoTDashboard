@@ -85,6 +85,11 @@ AUTH_RETRY_SECONDS = 900.0
 #: another login, so trying again soon only keeps the block going -- and it
 #: blocks the phone app's logins on the same account too.
 RATE_LIMIT_RETRY_SECONDS = 900.0
+#: ...and doubled for each 429 in a row, up to this. Toshiba does not say how
+#: long its block lasts; if it counts logins over a window, a steady retry
+#: every 15 minutes -- three logins each, with the library's own retries --
+#: can keep it in place for good.
+RATE_LIMIT_MAX_SECONDS = 4 * 3600.0
 MAX_BACKOFF_SECONDS = 600.0
 
 
@@ -134,11 +139,12 @@ class ToshibaAdapter:
 
     async def _run(self) -> None:
         backoff = 10.0
+        limited = 0     # 429s in a row
         while True:
             wait = backoff
             try:
                 await self._connect()
-                backoff = 10.0
+                backoff, limited = 10.0, 0
                 await self._watch()
                 log.warning("toshiba cloud connection stayed down; logging in again")
             except asyncio.CancelledError:
@@ -148,9 +154,12 @@ class ToshibaAdapter:
                 wait = AUTH_RETRY_SECONDS
             except Exception as exc:  # noqa: BLE001 - any failure means "try again later"
                 if rate_limited(exc):
-                    log.warning("toshiba is limiting logins (%s); trying again in %d minutes",
-                                exc, RATE_LIMIT_RETRY_SECONDS // 60)
-                    wait = RATE_LIMIT_RETRY_SECONDS
+                    limited += 1
+                    wait = min(RATE_LIMIT_RETRY_SECONDS * 2 ** (limited - 1), RATE_LIMIT_MAX_SECONDS)
+                    log.warning(
+                        "toshiba is limiting logins (%s, %d in a row); next try in %d minutes, at %s",
+                        exc, limited, wait // 60, time.strftime("%H:%M", time.localtime(time.time() + wait)),
+                    )
                 else:
                     log.warning("toshiba cloud unavailable: %s", exc)
                     backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
