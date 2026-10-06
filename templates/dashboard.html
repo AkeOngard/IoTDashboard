@@ -13,12 +13,22 @@
   <div class="flex items-start justify-between gap-2">
     <span class="dev-icon" :class="{{ d }}.online && iconActive({{ d }}) && 'is-active'"
           :style="iconStyle({{ d }})" x-html="devIcon({{ d }})"></span>
-    <template x-if="isSwitchable({{ d }})">
-      <button class="toggle z-10" :class="isPending({{ d }}.id, 'switch') && 'is-pending'"
-              :aria-pressed="isOn({{ d }}) ? 'true' : 'false'"
-              :aria-label="(isOn({{ d }}) ? tr('ปิด ') : tr('เปิด ')) + {{ d }}.name"
-              :disabled="!{{ d }}.online" @click="toggle({{ d }})"></button>
-    </template>
+    <div class="flex items-center gap-2">
+      <!-- Lost: the hub (or, for an AC, its Wi-Fi adapter) cannot reach it.
+           Said with a mark as well as the word, so a wall panel shows it at
+           a glance from across the room. -->
+      <template x-if="!{{ d }}.online">
+        <span class="ic h-5 w-5 text-[var(--danger-text)]" role="img"
+              :aria-label="tr('ขาดการเชื่อมต่อ')" :title="tr('ขาดการเชื่อมต่อ')"
+              x-html="icon('alert-offline')"></span>
+      </template>
+      <template x-if="isSwitchable({{ d }})">
+        <button class="toggle z-10" :class="isPending({{ d }}.id, 'switch') && 'is-pending'"
+                :aria-pressed="isOn({{ d }}) ? 'true' : 'false'"
+                :aria-label="(isOn({{ d }}) ? tr('ปิด ') : tr('เปิด ')) + {{ d }}.name"
+                :disabled="!{{ d }}.online" @click="toggle({{ d }})"></button>
+      </template>
+    </div>
   </div>
   <a :href="deviceHref({{ d }})"
      class="mt-auto block pt-3 outline-none after:absolute after:inset-0 after:rounded-2xl after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-[var(--accent)]">
@@ -518,10 +528,14 @@
               <div class="tile-link relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b border-[var(--line)] px-4 py-3 last:border-b-0 md:grid-cols-[minmax(0,2fr)_minmax(0,1.2fr)_110px_90px_60px] md:px-5"
                    :class="!d.online && 'opacity-60'">
                 <div class="flex min-w-0 items-center gap-3">
-                  <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                  <span class="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
                         :class="tileOn(d) ? 'bg-[var(--accent-soft)]' : 'bg-[var(--tile)]'">
                     <span class="dev-icon" :class="d.online && iconActive(d) && 'is-active'"
                           :style="iconStyle(d)" x-html="devIcon(d)"></span>
+                    <template x-if="!d.online">
+                      <span class="ic absolute -bottom-1 -right-1 h-4 w-4 rounded-full bg-[var(--bg)] text-[var(--danger-text)]"
+                            role="img" :aria-label="tr('ขาดการเชื่อมต่อ')" x-html="icon('alert-offline')"></span>
+                    </template>
                   </span>
                   <div class="min-w-0">
                     <a :href="deviceHref(d)" x-text="d.name"

@@ -366,5 +366,6 @@ window.I18N = {
   "เป็น": "is",
   "ไม่ใช่": "is not",
   "{name} {what} เป็น {value}": "{name} {what} is {value}",
-  "{name} {what} ไม่ใช่ {value}": "{name} {what} is not {value}"
+  "{name} {what} ไม่ใช่ {value}": "{name} {what} is not {value}",
+  "ขาดการเชื่อมต่อ": "Not connected"
 };
