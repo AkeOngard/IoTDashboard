@@ -325,7 +325,7 @@ function dashboard() {
     get houseLine() {
       const parts = [tr('ออนไลน์ {on} จาก {n} อุปกรณ์', { on: this.onlineCount, n: this.devices.length })];
       const t = this.climate('temperature');
-      if (t) parts.push(tr('ในบ้าน {t}°C', { t: t.text }));
+      if (t) parts.push(tr('{place} {t}°C', { place: t.label, t: t.text }));
       return parts.join(' · ');
     },
 
@@ -460,17 +460,34 @@ function dashboard() {
     /** Average and extreme of one reading across the house, or null when no
      *  online device reports it. */
     climate(cap) {
-      const rows = this.devices
+      let rows = this.devices
         .filter(d => d.online)
         .map(d => ({ d, v: this.value(d.id, cap) }))
         .filter(r => typeof r.v === 'number');
+      // An AC's own thermometer sits in its air intake near the ceiling,
+      // reads whole degrees and runs cold while the unit cools: a stand-in
+      // while nothing else measures the room, never averaged with a sensor.
+      const sensors = rows.filter(r => !this.isAc(r.d));
+      if (sensors.length) rows = sensors;
       if (!rows.length) return null;
       const avg = rows.reduce((sum, r) => sum + r.v, 0) / rows.length;
+      const coarse = rows.every(r => this.isAc(r.d));
       return {
-        text: cap === 'temperature' ? avg.toFixed(1) : String(Math.round(avg)),
+        // No decimal a whole-degree sensor never measured.
+        text: cap === 'temperature' && !coarse ? avg.toFixed(1) : String(Math.round(avg)),
         color: this.rgb(this.ramp(this.RAMP[cap], avg)),
         many: rows.length > 1,
+        label: this.placeOf(rows.map(r => r.d)),
       };
+    },
+
+    /** Where readings come from, said as plainly as it can be: one room's
+     *  name, one device's when it has no room, or "the house". */
+    placeOf(devices) {
+      const rooms = [...new Set(devices.map(d => d.room))];
+      if (rooms.length === 1 && rooms[0] && rooms[0] !== this.UNASSIGNED) return this.roomLabel(rooms[0]);
+      if (devices.length === 1) return devices[0].name;
+      return tr('ในบ้าน');
     },
 
     /* Groups: the whole house, every room with something to switch, and the

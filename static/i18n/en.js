@@ -44,7 +44,7 @@ window.I18N = {
   "สวัสดีตอนดึก": "Good evening",
   " · บ้าน": " · Home",
   "ออนไลน์ {on} จาก {n} อุปกรณ์": "{on} of {n} devices online",
-  "ในบ้าน {t}°C": "Indoors {t}°C",
+  "{place} {t}°C": "{place} {t}°C",
   "ภาพรวมบ้าน": "House at a glance",
   "ออนไลน์": "Online",
   "เปิดอยู่": "On",

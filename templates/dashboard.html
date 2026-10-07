@@ -367,7 +367,9 @@
                 </div>
                 <div class="pane p-4">
                   <div class="flex items-center justify-between text-[14px] text-[var(--muted)]">
-                    <span>{{ _('ในบ้าน') }}</span><span class="ic h-5 w-5 text-[var(--faint)]" x-html="icon('thermo')"></span>
+                    <!-- Says where the number comes from: "ห้องนอน" when one room's
+                         thermometer is all there is, "ในบ้าน" for an average. -->
+                    <span class="truncate" x-text="(climate('temperature') || {}).label || tr('ในบ้าน')">{{ _('ในบ้าน') }}</span><span class="ic h-5 w-5 shrink-0 text-[var(--faint)]" x-html="icon('thermo')"></span>
                   </div>
                   <p class="mt-2 text-[32px] font-medium leading-tight tabular-nums">
                     <template x-if="climate('temperature')">
