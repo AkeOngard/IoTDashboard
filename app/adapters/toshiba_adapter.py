@@ -25,6 +25,7 @@ import logging
 import os
 import secrets
 import time
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -108,6 +109,11 @@ class ToshibaAdapter:
         self._on_status: StatusSink | None = None
         self._task: asyncio.Task | None = None
         self._connected = False
+        #: device id -> when that AC last said anything to the cloud (epoch).
+        #: Toshiba never announces an adapter dropping off -- it just goes
+        #: quiet -- so silence is the only sign there is.
+        self._last_heard: dict[str, float] = {}
+        self._offline_after = max(5.0, settings.toshiba_offline_minutes) * 60
 
     @property
     def configured(self) -> bool:
@@ -205,11 +211,60 @@ class ToshibaAdapter:
                 },
             )
             ac.on_state_changed_callback.add(self._state_changed)
+        self._listen_for_messages()
+        await self._read_last_contact(acs)
         log.info("toshiba cloud connected: %d air conditioner(s)", len(acs))
 
         await self._set_connected(True)
         for ac in acs:
             await self._state_changed(ac)
+
+    def _listen_for_messages(self) -> None:
+        """Note the time of everything each AC pushes -- state and heartbeats
+        alike -- before the library handles it. A heartbeat that changes
+        nothing never reaches _state_changed, yet it is proof of life.
+
+        The SDK may call these from its own thread: keep it to one dict write.
+        """
+        amqp = getattr(self._manager, "amqp_api", None)
+        handlers = getattr(amqp, "handlers", None)
+        if not isinstance(handlers, dict):
+            return
+        for command, original in list(handlers.items()):
+            def heard(source_id, message_id, target_id, payload, timestamp, _original=original):
+                self._last_heard["toshiba:" + str(source_id)] = time.time()
+                return _original(source_id, message_id, target_id, payload, timestamp)
+            handlers[command] = heard
+
+    async def _read_last_contact(self, acs: list[ToshibaAcDevice]) -> None:
+        """When each AC last talked to the cloud, as the cloud has it.
+
+        This is what tells a unit unplugged weeks ago from a quiet one at
+        start-up, before there has been time to notice any silence. One
+        request per AC, once per connection. Any doubt counts as "just
+        heard": better to show a lost AC late than a working one as lost.
+        """
+        http = getattr(self._manager, "http_api", None)
+        now = time.time()
+        for ac in acs:
+            device_id = "toshiba:" + ac.ac_unique_id
+            self._last_heard[device_id] = now
+            try:
+                record = await http.request_api(
+                    http.AC_STATE_PATH, get={"ACId": ac.ac_id, "consumerId": http.consumer_id})
+                last = _epoch(record.get("LastConnectionTime"))
+            except Exception as exc:  # noqa: BLE001 - liveness is best effort
+                log.warning("could not read when %s last connected: %s", ac.name, exc)
+                continue
+            if last is not None:
+                self._last_heard[device_id] = min(now, last)
+                if now - last > self._offline_after:
+                    log.warning("%s last reached Toshiba's cloud at %s; showing it as offline",
+                                ac.name, record.get("LastConnectionTime"))
+
+    def _reachable(self, device_id: str) -> bool:
+        heard = self._last_heard.get(device_id)
+        return heard is None or time.time() - heard <= self._offline_after
 
     async def _watch(self) -> None:
         """Mirror the SDK's connection state until it has been down too long."""
@@ -219,6 +274,7 @@ class ToshibaAdapter:
             client = getattr(getattr(self._manager, "amqp_api", None), "device", None)
             up = bool(client is not None and client.connected)
             await self._set_connected(up)
+            await self._refresh_online()
             if up:
                 down_since = None
             elif down_since is None:
@@ -238,11 +294,21 @@ class ToshibaAdapter:
         if connected == self._connected:
             return
         self._connected = connected
-        for device in self._devices.values():
-            device.online = connected
         if self._on_status is not None:
             await self._on_status(connected)
-        if self.on_devices_changed is not None:
+        await self._refresh_online(force=True)
+
+    async def _refresh_online(self, force: bool = False) -> None:
+        """An AC is online while the cloud connection is up and the AC itself
+        has been heard from lately. Tell the hub only when that changed."""
+        changed = force
+        for device_id, device in self._devices.items():
+            online = self._connected and self._reachable(device_id)
+            if online != device.online:
+                device.online = online
+                changed = True
+                log.info("%s is %s", device.name, "back online" if online else "offline (no word from it)")
+        if changed and self.on_devices_changed is not None:
             await self.on_devices_changed()
 
     def _client_id(self) -> str:
@@ -334,6 +400,10 @@ class ToshibaAdapter:
             raise CommandError("air conditioner is not known to Toshiba's cloud")
         if not self._connected:
             raise CommandError("not connected to Toshiba's cloud")
+        if not self._reachable(command.device_id):
+            # The cloud would take it and the AC would never hear it; say so
+            # now rather than after the confirmation times out.
+            raise CommandError("%s has not reached Toshiba's cloud lately (power or Wi-Fi off?)" % ac.name)
         cap, value = command.capability, command.value
         try:
             if cap is Capability.SWITCH:
@@ -360,6 +430,17 @@ def rate_limited(exc: BaseException) -> bool:
     """Is this Toshiba saying "too many requests"? The library raises its
     rate-limit error for 403 only; a 429 comes as a plain API error."""
     return isinstance(exc, ToshibaAcHttpApiRateLimitError) or "HTTP 429" in str(exc)
+
+
+def _epoch(stamp: Any) -> float | None:
+    """'2026-10-07T15:28:48.967Z' -> seconds since the epoch, or None."""
+    if not isinstance(stamp, str) or not stamp:
+        return None
+    try:
+        parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.timestamp() if parsed.tzinfo else None
 
 
 def _words(members: list[Enum], words: dict[str, str]) -> list[str]:

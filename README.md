@@ -175,8 +175,10 @@ docker restart iot-app
 - ใส่รหัสผ่านผิด แอปจะรอ 15 นาทีก่อนลองใหม่ เพื่อไม่ให้บัญชีโดนล็อก
 - กินแรม Pi เพิ่มราว 20 MB และ thread ของ Azure SDK อีก 4 ตัว — import เฉพาะเมื่อเปิด `toshiba`
 - ถ้าสั่งแล้วแอร์ทำงาน แต่หน้าเว็บขึ้นว่าคำสั่งล้มเหลว ให้เพิ่ม `COMMAND_TIMEOUT` เป็น `10`
-- cloud ของ Toshiba ไม่แจ้งเมื่อ Wi-Fi adapter ของแอร์หลุด (ไฟดับ, ถอดปลั๊ก) — ดูว่าแต่ละตัวส่งอะไรมาบ้างด้วย
-  `docker exec -it iot-app python scripts/toshiba_probe.py` (ฟัง 10 นาที ไม่พิมพ์รหัสผ่านหรือ token)
+- **แอร์ที่หลุด** (ไฟดับ, ถอดปลั๊ก, Wi-Fi adapter ดับ) ขึ้นไอคอน Wi-Fi ขีดฆ่า — cloud ไม่แจ้งเรื่องนี้เอง
+  dashboard จึงดูจาก `LastConnectionTime` ของแต่ละเครื่องตอนเชื่อมต่อ และจับเวลาข้อความที่แอร์ส่งมาหลังจากนั้น
+  แอร์ที่ปกติดีติดต่อราวทุก 15 นาที เงียบเกิน `TOSHIBA_OFFLINE_MINUTES` (45) ถือว่าหลุด พอส่งอะไรมาก็กลับเป็นออนไลน์
+  ดูว่าแต่ละตัวส่งอะไรมาบ้างด้วย `docker exec -it iot-app python scripts/toshiba_probe.py` (ไม่พิมพ์รหัสผ่านหรือ token)
 
 ที่หน้าอุปกรณ์ของแอร์มี อุณหภูมิที่ตั้ง (17–30°C) โหมด ความแรงลม ทิศทางลม อุณหภูมิในห้องและนอกบ้าน
 โหมดที่แอร์รุ่นนั้นไม่รองรับ (เช่น "ร้อน" ของแอร์ที่ทำความเย็นอย่างเดียว) จะไม่แสดง
@@ -215,6 +217,7 @@ docker restart iot-app
 | `TOSHIBA_USERNAME` / `_PASSWORD` | *(ว่าง)* | บัญชี Toshiba Home AC Control ใช้เมื่อ adapter มี `toshiba` · รหัสผ่านควรเก็บเป็นไฟล์ secret |
 | `SECRETS_DIR` | `/run/secrets` | โฟลเดอร์ไฟล์ secret (นอก container ใช้ `./secrets` ด้วย) |
 | `TOSHIBA_STATE_PATH` | `data/toshiba.json` | id ที่ dashboard ลงทะเบียนกับ cloud ของ Toshiba และ session ที่ล็อกอินไว้ |
+| `TOSHIBA_OFFLINE_MINUTES` | `45` | แอร์เงียบนานเท่านี้ถือว่าหลุด (แอร์ที่ปกติติดต่อราวทุก 15 นาที) |
 | `DATABASE_URL` | *(ว่าง)* | เว้นว่าง = ปิด history ทั้งหมด · พอร์ต 6543 (transaction pooler) แอปปิด prepared statement ให้เอง |
 | `HISTORY_RETENTION_DAYS` | `400` | ใช้เฉพาะบน Postgres ธรรมดา · บน TimescaleDB policy ใน migration 005 เป็นคนจัดการ · `0` = ไม่ลบเลย |
 | `TELEMETRY_FLUSH_SECONDS` | `2` | หน่วงก่อน INSERT เป็นชุด · ตั้งสูงขึ้นเมื่อ database อยู่ไกล |

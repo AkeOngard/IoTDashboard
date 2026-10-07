@@ -95,7 +95,9 @@ async def main(minutes: float) -> int:
         print("TOSHIBA_USERNAME / toshiba_password are not set (see README)", file=sys.stderr)
         return 1
     logging.basicConfig(level=logging.WARNING)
-    for noisy in ("toshiba_ac", "azure.iot.device"):
+    # The library warns about every push from an AC it was not asked to
+    # track -- here, all of them. The timeline below says it better.
+    for noisy in ("toshiba_ac", "toshiba_ac.device_manager", "azure.iot.device"):
         logging.getLogger(noisy).setLevel(logging.ERROR)
 
     from toshiba_ac.device_manager import ToshibaAcDeviceManager
