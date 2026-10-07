@@ -44,7 +44,7 @@ window.I18N = {
   "สวัสดีตอนดึก": "Good evening",
   " · บ้าน": " · Home",
   "ออนไลน์ {on} จาก {n} อุปกรณ์": "{on} of {n} devices online",
-  "ในบ้าน {t}°C": "Indoors {t}°C",
+  "{place} {t}°C": "{place} {t}°C",
   "ภาพรวมบ้าน": "House at a glance",
   "ออนไลน์": "Online",
   "เปิดอยู่": "On",
@@ -366,5 +366,6 @@ window.I18N = {
   "เป็น": "is",
   "ไม่ใช่": "is not",
   "{name} {what} เป็น {value}": "{name} {what} is {value}",
-  "{name} {what} ไม่ใช่ {value}": "{name} {what} is not {value}"
+  "{name} {what} ไม่ใช่ {value}": "{name} {what} is not {value}",
+  "ขาดการเชื่อมต่อ": "Not connected"
 };

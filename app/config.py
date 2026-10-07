@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     #: under. Every client of one account needs its own: two sharing an id
     #: knock each other off the connection in turn.
     toshiba_state_path: str = str(ROOT / "data" / "toshiba.json")
+    #: An AC silent this long counts as offline (power or Wi-Fi gone). A
+    #: working unit reports roughly every 15 minutes, so keep a margin.
+    toshiba_offline_minutes: float = 45.0
 
     # --- storage ------------------------------------------------------------
     #: Empty disables persistence; the app then runs live-only.

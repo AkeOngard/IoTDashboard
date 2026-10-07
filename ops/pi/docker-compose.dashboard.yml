@@ -28,6 +28,11 @@ services:
       # shows in `docker inspect`. It goes in a file instead --
       #   sudo sh scripts/set_secret.sh toshiba_password
       TOSHIBA_USERNAME: ${TOSHIBA_USERNAME:-}
+      # Minutes of silence before an AC shows as offline (it reports roughly
+      # every 15), and seconds to wait for a device to confirm a command --
+      # a cloud round trip can want 10.
+      TOSHIBA_OFFLINE_MINUTES: ${TOSHIBA_OFFLINE_MINUTES:-45}
+      COMMAND_TIMEOUT: ${COMMAND_TIMEOUT:-5}
       MATTER_WS_URL: ws://127.0.0.1:5580/ws
       # Empty = history off; the app runs live-only and says so in the header.
       # Set it in .env to a managed Postgres (see DEPLOY-CLOUD.md 2.6) and the
