@@ -165,11 +165,12 @@ docker restart iot-app
 
 - **แอปบนมือถือและรีโมตยังใช้ได้ปกติ** — dashboard ลงทะเบียนเป็น "มือถืออีกเครื่อง" ในบัญชี
   และได้สถานะแบบ push ภายในราว 1 วินาที ไม่ว่าจะสั่งจากที่ไหน
-- id ที่ลงทะเบียนเก็บไว้ใน `data/toshiba.json` (`TOSHIBA_STATE_PATH`) — อย่าคัดลอกไฟล์นี้ไปให้ระบบอื่น
+- id ที่ลงทะเบียนและ session ที่ล็อกอินไว้เก็บใน `data/toshiba.json` (`TOSHIBA_STATE_PATH`, สิทธิ์ 600)
+  รีสตาร์ตจึงไม่ต้องล็อกอินใหม่ — อย่าคัดลอกไฟล์นี้ไปให้ระบบอื่น
   (เช่น Home Assistant) ที่ใช้บัญชีเดียวกัน ไม่งั้นจะแย่งการเชื่อมต่อกันหลุดสลับไปมา
 - **ต้องมีอินเทอร์เน็ต** (ขาออก 443 และ 8883 ไป Azure IoT Hub) เน็ตหลุดหรือ cloud ล่ม = สั่งแอร์ไม่ได้
   ส่วนอุปกรณ์ Matter ยังทำงานตามปกติ
-- **ไม่ใช่ API ทางการ** (ไลบรารี [`toshiba-ac`](https://github.com/KaSroka/Toshiba-AC-control)
+- **ไม่ใช่ API ทางการ** (ไลบรารี [`toshiba-ac-community`](https://github.com/vmvelev/Toshiba-AC-control)
   แกะจากแอป) Toshiba เปลี่ยนระบบเมื่อไรอาจใช้ไม่ได้ทันที
 - ใส่รหัสผ่านผิด แอปจะรอ 15 นาทีก่อนลองใหม่ เพื่อไม่ให้บัญชีโดนล็อก
 - กินแรม Pi เพิ่มราว 20 MB และ thread ของ Azure SDK อีก 4 ตัว — import เฉพาะเมื่อเปิด `toshiba`
@@ -213,7 +214,7 @@ docker restart iot-app
 | `TUYA_POLL_SECONDS` | `15` | บังคับขั้นต่ำ 10 วินาที (rate limit) |
 | `TOSHIBA_USERNAME` / `_PASSWORD` | *(ว่าง)* | บัญชี Toshiba Home AC Control ใช้เมื่อ adapter มี `toshiba` · รหัสผ่านควรเก็บเป็นไฟล์ secret |
 | `SECRETS_DIR` | `/run/secrets` | โฟลเดอร์ไฟล์ secret (นอก container ใช้ `./secrets` ด้วย) |
-| `TOSHIBA_STATE_PATH` | `data/toshiba.json` | id ที่ dashboard ลงทะเบียนกับ cloud ของ Toshiba |
+| `TOSHIBA_STATE_PATH` | `data/toshiba.json` | id ที่ dashboard ลงทะเบียนกับ cloud ของ Toshiba และ session ที่ล็อกอินไว้ |
 | `DATABASE_URL` | *(ว่าง)* | เว้นว่าง = ปิด history ทั้งหมด · พอร์ต 6543 (transaction pooler) แอปปิด prepared statement ให้เอง |
 | `HISTORY_RETENTION_DAYS` | `400` | ใช้เฉพาะบน Postgres ธรรมดา · บน TimescaleDB policy ใน migration 005 เป็นคนจัดการ · `0` = ไม่ลบเลย |
 | `TELEMETRY_FLUSH_SECONDS` | `2` | หน่วงก่อน INSERT เป็นชุด · ตั้งสูงขึ้นเมื่อ database อยู่ไกล |

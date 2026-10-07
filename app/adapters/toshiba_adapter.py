@@ -151,6 +151,7 @@ class ToshibaAdapter:
                 raise
             except ToshibaAcHttpApiAuthError as exc:
                 log.error("toshiba login refused (%s); check TOSHIBA_USERNAME/PASSWORD", exc)
+                self._forget_token()
                 wait = AUTH_RETRY_SECONDS
             except Exception as exc:  # noqa: BLE001 - any failure means "try again later"
                 if rate_limited(exc):
@@ -168,7 +169,20 @@ class ToshibaAdapter:
             await asyncio.sleep(wait)
 
     async def _connect(self) -> None:
-        self._manager = ToshibaAcDeviceManager(self._username, self._password, self._client_id())
+        # A saved session skips /api/Consumer/Login, the endpoint Toshiba
+        # limits hardest: a restart then costs no login at all. A stale token
+        # gets a 401, and the library logs in again by itself.
+        saved = self._read_state()
+        same_account = saved.get("token_user") == self._username
+        self._manager = ToshibaAcDeviceManager(
+            self._username,
+            self._password,
+            self._client_id(),
+            access_token=saved.get("access_token") if same_account else None,
+            access_token_type=saved.get("access_token_type") if same_account else None,
+            consumer_id=saved.get("consumer_id") if same_account else None,
+        )
+        self._manager.on_access_token_updated_callback.add(self._token_updated)
         await self._manager.connect()
         acs = await self._manager.get_devices()
 
@@ -245,14 +259,37 @@ class ToshibaAdapter:
         if self._state_path is None:
             log.warning("TOSHIBA_STATE_PATH is empty; registering under a new id every start")
             return client_id
+        self._write_state(client_id=client_id)
+        return client_id
+
+    async def _token_updated(self, values: tuple[str, str, str]) -> None:
+        """A login succeeded: keep the session for the next start."""
+        access_token, token_type, consumer_id = values
+        self._write_state(
+            access_token=access_token, access_token_type=token_type,
+            consumer_id=consumer_id, token_user=self._username,
+        )
+
+    def _forget_token(self) -> None:
+        self._write_state(access_token=None, access_token_type=None, consumer_id=None, token_user=None)
+
+    def _write_state(self, **changes: Any) -> None:
+        """Merge `changes` into the state file. It now holds a login session,
+        so it is written readable by the app's user alone -- as auth.json is."""
+        if self._state_path is None:
+            return
+        data = {**self._read_state(), "version": 1, **changes}
+        data = {k: v for k, v in data.items() if v is not None}
+        temp = self._state_path.with_name(self._state_path.name + ".tmp")
         try:
             self._state_path.parent.mkdir(parents=True, exist_ok=True)
-            temp = self._state_path.with_name(self._state_path.name + ".tmp")
-            temp.write_text(json.dumps({"version": 1, "client_id": client_id}), encoding="utf-8")
+            fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(data, handle)
+            os.chmod(temp, 0o600)
             os.replace(temp, self._state_path)
         except OSError as exc:
-            log.warning("could not save the toshiba client id to %s: %s", self._state_path, exc)
-        return client_id
+            log.warning("could not save %s: %s", self._state_path, exc)
 
     def _read_state(self) -> dict[str, Any]:
         if self._state_path is None:

@@ -29,6 +29,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import secrets
 import sys
 import time
@@ -46,6 +47,9 @@ SECRET_KEYS = {"access_token", "token", "password", "sastoken", "sas_token", "pr
 
 
 def _probe_id() -> str:
+    """This probe's own id, 16 hex digits like the dashboard's: the library
+    sends it as the Device-ID header, without which Toshiba's firewall
+    answers every login with 429."""
     path = Path(settings.toshiba_state_path) if settings.toshiba_state_path else None
     data: dict = {}
     if path is not None:
@@ -54,15 +58,19 @@ def _probe_id() -> str:
         except (OSError, ValueError):
             data = {}
     probe = data.get("probe_id")
-    if isinstance(probe, str) and probe:
+    if isinstance(probe, str) and re.fullmatch(r"[0-9a-f]{16}", probe):
         return probe
-    probe = "probe" + secrets.token_hex(6)
+    probe = secrets.token_hex(8)
     if path is not None:
         data["probe_id"] = probe
         try:
+            # The file holds the dashboard's login session too: owner only.
             temp = path.with_name(path.name + ".tmp")
             path.parent.mkdir(parents=True, exist_ok=True)
-            temp.write_text(json.dumps(data), encoding="utf-8")
+            fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(data, handle)
+            os.chmod(temp, 0o600)
             os.replace(temp, path)
         except OSError:
             pass
