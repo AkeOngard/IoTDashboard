@@ -32,8 +32,11 @@ from typing import Any
 
 from toshiba_ac.device import ToshibaAcDevice, ToshibaAcDeviceError
 from toshiba_ac.device.properties import (
+    ToshibaAcAirPureIon,
     ToshibaAcFanMode,
+    ToshibaAcMeritA,
     ToshibaAcMode,
+    ToshibaAcPowerSelection,
     ToshibaAcStatus,
     ToshibaAcSwingMode,
 )
@@ -60,6 +63,8 @@ CAPABILITIES = [
     Capability.TEMPERATURE,
     Capability.OUTDOOR_TEMPERATURE,
 ]
+#: Settings only some models have; Device.choices says which.
+EXTRAS = [Capability.AC_PRESET, Capability.AIR_PURIFIER, Capability.POWER_LIMIT]
 
 #: Library enum member name -> the word the rest of the app uses.
 MODE_WORDS = {"AUTO": "auto", "COOL": "cool", "HEAT": "heat", "DRY": "dry", "FAN": "fan"}
@@ -73,6 +78,16 @@ SWING_WORDS = {
     "FIXED_1": "fixed_1", "FIXED_2": "fixed_2", "FIXED_3": "fixed_3",
     "FIXED_4": "fixed_4", "FIXED_5": "fixed_5",
 }
+#: Toshiba's "merit A" feature: one extra at a time, as on the remote. Left
+#: out: FLOOR and HEATING_8C, which only mean anything when heating -- and
+#: HEATING_8C shifts every set point by 16 degrees.
+PRESET_WORDS = {
+    "OFF": "off", "ECO": "eco", "HIGH_POWER": "high_power",
+    "CDU_SILENT_1": "silent_1", "CDU_SILENT_2": "silent_2",
+    "SLEEP_CARE": "sleep", "COMFORT": "comfort",
+}
+PURIFIER_WORDS = {"OFF": "off", "ON": "on"}
+POWER_WORDS = {"POWER_100": "100", "POWER_75": "75", "POWER_50": "50"}
 
 #: How often to look at the cloud connection. The SDK reconnects by itself;
 #: this only mirrors its state onto the dashboard.
@@ -196,6 +211,21 @@ class ToshibaAdapter:
         for ac in acs:
             device_id = "toshiba:" + ac.ac_unique_id
             self._acs[device_id] = ac
+            choices = {
+                Capability.HVAC_MODE: _words(ac.supported.ac_mode, MODE_WORDS),
+                Capability.FAN_MODE: _words(ac.supported.ac_fan_mode, FAN_WORDS),
+                Capability.SWING_MODE: _words(ac.supported.ac_swing_mode, SWING_WORDS),
+            }
+            # The extras, each only where the model has it: "off" alone is
+            # no feature at all.
+            for cap, members, words in (
+                (Capability.AC_PRESET, _presets_in_any_mode(ac), PRESET_WORDS),
+                (Capability.AIR_PURIFIER, ac.supported.ac_air_pure_ion, PURIFIER_WORDS),
+                (Capability.POWER_LIMIT, ac.supported.ac_power_selection, POWER_WORDS),
+            ):
+                offered = _words(members, words)
+                if len(offered) > 1:
+                    choices[cap] = offered
             self._devices[device_id] = Device(
                 id=device_id,
                 name=ac.name or "Air conditioner",
@@ -203,12 +233,8 @@ class ToshibaAdapter:
                 adapter=self.name,
                 native_id=ac.ac_unique_id,
                 kind="ac",
-                capabilities=list(CAPABILITIES),
-                choices={
-                    Capability.HVAC_MODE: _words(ac.supported.ac_mode, MODE_WORDS),
-                    Capability.FAN_MODE: _words(ac.supported.ac_fan_mode, FAN_WORDS),
-                    Capability.SWING_MODE: _words(ac.supported.ac_swing_mode, SWING_WORDS),
-                },
+                capabilities=CAPABILITIES + [c for c in EXTRAS if c in choices],
+                choices=choices,
             )
             ac.on_state_changed_callback.add(self._state_changed)
         self._listen_for_messages()
@@ -387,9 +413,13 @@ class ToshibaAdapter:
             (Capability.SWING_MODE, SWING_WORDS.get(ac.ac_swing_mode.name)),
             (Capability.TEMPERATURE, ac.ac_indoor_temperature),
             (Capability.OUTDOOR_TEMPERATURE, ac.ac_outdoor_temperature),
+            (Capability.AC_PRESET, PRESET_WORDS.get(ac.ac_merit_a.name)),
+            (Capability.AIR_PURIFIER, PURIFIER_WORDS.get(ac.ac_air_pure_ion.name)),
+            (Capability.POWER_LIMIT, POWER_WORDS.get(ac.ac_power_selection.name)),
         ]
+        capabilities = self._devices[device_id].capabilities
         for cap, value in readings:
-            if value is not None:
+            if value is not None and cap in capabilities:
                 await self._on_state(StateEvent(device_id, cap, value))
 
     # ---------------------------------------------------------------- writes
@@ -416,6 +446,18 @@ class ToshibaAdapter:
                 await ac.set_ac_fan_mode(_member(ToshibaAcFanMode, FAN_WORDS, value))
             elif cap is Capability.SWING_MODE:
                 await ac.set_ac_swing_mode(_member(ToshibaAcSwingMode, SWING_WORDS, value))
+            elif cap is Capability.AC_PRESET:
+                preset = _member(ToshibaAcMeritA, PRESET_WORDS, value)
+                if preset not in _presets_for_mode(ac):
+                    # The library would quietly send "off" instead, and the
+                    # command would only time out waiting for its echo.
+                    raise CommandError("%s is not available in %s mode"
+                                       % (value, MODE_WORDS.get(ac.ac_mode.name, "this")))
+                await ac.set_ac_merit_a(preset)
+            elif cap is Capability.AIR_PURIFIER:
+                await ac.set_ac_air_pure_ion(_member(ToshibaAcAirPureIon, PURIFIER_WORDS, value))
+            elif cap is Capability.POWER_LIMIT:
+                await ac.set_ac_power_selection(_member(ToshibaAcPowerSelection, POWER_WORDS, value))
             else:
                 raise CommandError("capability " + cap.value + " is not writable over Toshiba")
         except CommandError:
@@ -441,6 +483,26 @@ def _epoch(stamp: Any) -> float | None:
     except ValueError:
         return None
     return parsed.timestamp() if parsed.tzinfo else None
+
+
+def _presets_for_mode(ac: ToshibaAcDevice) -> list[Enum]:
+    """The extras the AC takes in the mode it is in: in dry and fan mode
+    there is no ECO, Hi Power or quiet outdoor unit."""
+    try:
+        return ac.supported.for_ac_mode(ac.ac_mode).ac_merit_a
+    except KeyError:    # a mode the library has no table for: let the AC judge
+        return ac.supported.ac_merit_a
+
+
+def _presets_in_any_mode(ac: ToshibaAcDevice) -> list[Enum]:
+    """The extras worth offering: those the AC takes in at least one of its
+    modes. Sleep Care, say, is a heating feature -- a cooling-only unit
+    lists it, yet could never use it."""
+    usable: set[Enum] = set()
+    for mode in ac.supported.ac_mode:
+        with contextlib.suppress(KeyError):
+            usable.update(ac.supported.for_ac_mode(mode).ac_merit_a)
+    return [m for m in ac.supported.ac_merit_a if m in usable]
 
 
 def _words(members: list[Enum], words: dict[str, str]) -> list[str]:

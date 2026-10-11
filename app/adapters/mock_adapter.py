@@ -42,8 +42,10 @@ def _devices() -> list[Device]:
         Device("mock:7", "Air Conditioner", "Bedroom", "mock", "7", "ac",
                [Capability.SWITCH, Capability.HVAC_MODE, Capability.TARGET_TEMPERATURE,
                 Capability.FAN_MODE, Capability.SWING_MODE, Capability.TEMPERATURE,
-                Capability.OUTDOOR_TEMPERATURE],
-               choices={Capability.HVAC_MODE: ["auto", "cool", "dry", "fan"]}),
+                Capability.OUTDOOR_TEMPERATURE, Capability.AC_PRESET, Capability.AIR_PURIFIER,
+                Capability.POWER_LIMIT],
+               choices={Capability.HVAC_MODE: ["auto", "cool", "dry", "fan"],
+                        Capability.AC_PRESET: ["off", "eco", "high_power", "silent_1", "silent_2", "comfort"]}),
     ]
 
 
@@ -75,6 +77,9 @@ class MockAdapter:
             ("mock:7", Capability.SWING_MODE): "off",
             ("mock:7", Capability.TEMPERATURE): 29.0,
             ("mock:7", Capability.OUTDOOR_TEMPERATURE): 34.0,
+            ("mock:7", Capability.AC_PRESET): "off",
+            ("mock:7", Capability.AIR_PURIFIER): "off",
+            ("mock:7", Capability.POWER_LIMIT): "100",
         }
         self._on_state: StateSink | None = None
         self._task: asyncio.Task | None = None
