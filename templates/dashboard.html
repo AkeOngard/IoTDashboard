@@ -668,7 +668,8 @@
                     </div>
                   </template>
 
-                  <!-- An air conditioner: set point, mode, fan and louvre. Like a
+                  <!-- An air conditioner: set point, mode, fan, louvre and the
+                       extras its model has (ECO, air purifier...). Like a
                        lamp's sliders, they only show while it runs. -->
                   <template x-if="isAc(detail) && detail.online && isOn(detail)">
                     <div class="flex flex-col gap-4">
@@ -705,7 +706,7 @@
                         </div>
                       </div>
                       <div class="grid grid-cols-2 gap-3">
-                        <template x-for="cap in ['fan_mode', 'swing_mode']" :key="cap">
+                        <template x-for="cap in AC_SELECTS.filter(c => detail.capabilities.includes(c))" :key="cap">
                           <label class="block" :class="isPending(detail.id, cap) && 'is-pending'">
                             <span class="mb-1.5 block text-[13px] text-[var(--faint)]" x-text="LABEL[cap]"></span>
                             <select class="field !h-10 !text-[15px]" @change="send(detail.id, cap, $event.target.value)">

@@ -28,6 +28,7 @@ function dashboard() {
       brightness: tr('ความสว่างไฟ'), color_temp: tr('โทนแสง'), switch: tr('สวิตช์'),
       hvac_mode: tr('โหมดแอร์'), target_temperature: tr('อุณหภูมิที่ตั้ง'), fan_mode: tr('ความแรงลม'),
       swing_mode: tr('ทิศทางลม'), outdoor_temperature: tr('อุณหภูมินอกบ้าน'),
+      ac_preset: tr('โหมดพิเศษ'), air_purifier: tr('ฟอกอากาศ'), power_limit: tr('จำกัดกำลังไฟ'),
     },
     UNIT: { brightness: '%', color_temp: 'K', target_temperature: '°C' },
     /* Settings that are one word from a list -- an air conditioner's mode,
@@ -44,7 +45,18 @@ function dashboard() {
         fixed_1: tr('ตำแหน่ง {n}', { n: 1 }), fixed_2: tr('ตำแหน่ง {n}', { n: 2 }), fixed_3: tr('ตำแหน่ง {n}', { n: 3 }),
         fixed_4: tr('ตำแหน่ง {n}', { n: 4 }), fixed_5: tr('ตำแหน่ง {n}', { n: 5 }),
       },
+      // As the remote and Toshiba's app name them. "Silent" quiets the
+      // outdoor unit, the neighbours' side, at some cost in cooling.
+      ac_preset: {
+        off: tr('ปกติ'), eco: 'ECO', high_power: 'Hi POWER',
+        silent_1: tr('คอยล์ร้อนเงียบ {n}', { n: 1 }), silent_2: tr('คอยล์ร้อนเงียบ {n}', { n: 2 }),
+        sleep: 'Sleep Care', comfort: 'Comfort',
+      },
+      air_purifier: { off: tr('ปิด'), on: tr('เปิด') },
+      power_limit: { 100: '100%', 75: '75%', 50: '50%' },
     },
+    // The AC settings beside its mode, each where the model has it.
+    AC_SELECTS: ['fan_mode', 'swing_mode', 'ac_preset', 'air_purifier', 'power_limit'],
     // What an AC's icon glows in, by mode.
     MODE_COLOR: { cool: 'rgb(98 166 232)', heat: 'rgb(229 111 92)', dry: 'rgb(79 189 232)', fan: 'var(--text)', auto: 'var(--accent-text)' },
     // Only these get a slider; every other writable setting has its own control.
@@ -435,7 +447,9 @@ function dashboard() {
       if (this.isAc(device)) {
         const t = this.shown(device.id, 'target_temperature');
         const mode = this.format(device.id, 'hvac_mode');
-        return typeof t === 'number' ? tr('{mode} · {t}°C', { mode, t }) : mode;
+        const line = typeof t === 'number' ? tr('{mode} · {t}°C', { mode, t }) : mode;
+        const preset = this.shown(device.id, 'ac_preset');
+        return preset && preset !== 'off' ? line + ' · ' + this.choiceText('ac_preset', preset) : line;
       }
       const level = this.shown(device.id, 'brightness');
       return typeof level === 'number' ? tr('เปิด · {level}%', { level }) : tr('เปิดอยู่');

@@ -25,6 +25,12 @@ class Capability(str, Enum):
     FAN_MODE = "fan_mode"
     SWING_MODE = "swing_mode"
     OUTDOOR_TEMPERATURE = "outdoor_temperature"
+    #: The remote's one-of extras: ECO, Hi Power, a quiet outdoor unit...
+    AC_PRESET = "ac_preset"
+    #: The AC's own air cleaner (Toshiba's "Air Pure Ion").
+    AIR_PURIFIER = "air_purifier"
+    #: A cap on the compressor, in percent of full power.
+    POWER_LIMIT = "power_limit"
 
 
 #: Capabilities a user can write to. Everything else is read-only telemetry.
@@ -36,6 +42,9 @@ WRITABLE: set[Capability] = {
     Capability.TARGET_TEMPERATURE,
     Capability.FAN_MODE,
     Capability.SWING_MODE,
+    Capability.AC_PRESET,
+    Capability.AIR_PURIFIER,
+    Capability.POWER_LIMIT,
 }
 
 #: Capabilities whose value is one word from a fixed list rather than a number.
@@ -47,6 +56,9 @@ CHOICES: dict[Capability, tuple[str, ...]] = {
         "off", "vertical", "horizontal", "both",
         "fixed_1", "fixed_2", "fixed_3", "fixed_4", "fixed_5",
     ),
+    Capability.AC_PRESET: ("off", "eco", "high_power", "silent_1", "silent_2", "sleep", "comfort"),
+    Capability.AIR_PURIFIER: ("off", "on"),
+    Capability.POWER_LIMIT: ("100", "75", "50"),
 }
 
 #: The set-point range an air conditioner's own remote offers.
