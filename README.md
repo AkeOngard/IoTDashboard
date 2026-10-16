@@ -228,6 +228,7 @@ docker restart iot-app
 | `DEVICE_LABELS_PATH` | `data/labels.json` | ชื่อ/ห้องที่ตั้งเองในหน้าเว็บ · เว้นว่าง = ปิดการเปลี่ยนชื่อ |
 | `DEVICE_GROUPS_PATH` | `data/groups.json` | กลุ่มที่สร้างเองในหน้าเว็บ (เช่น "ไฟชั้นล่าง") · เว้นว่าง = ปิดการสร้างกลุ่ม (กลุ่มตามห้องยังใช้ได้) |
 | `AUTOMATIONS_PATH` | `data/automations.json` | กฎอัตโนมัติ · เว้นว่าง = ปิดระบบอัตโนมัติ |
+| `HOUSE_PATH` | `data/house.json` | ผังบ้านของหน้า "บ้าน 3D" และตำแหน่งอุปกรณ์บนผัง · เว้นว่าง = ใช้ผังตั้งต้น แก้ไม่ได้ วางอุปกรณ์ตามชื่อห้องอย่างเดียว |
 | `TIMEZONE` | `Asia/Bangkok` | เวลาของบ้านสำหรับกฎตามเวลา — container รันเป็น UTC ถ้าไม่ตั้ง "22:30" จะกลายเป็นตี 5 ครึ่ง |
 | `PUBLIC_ORIGIN` | `http://localhost:8000` | CORS |
 | `ALLOWED_HOSTS` | `*` | TrustedHost (คั่นด้วย comma) — `127.0.0.1`/`localhost` ถูกเติมให้เองเพื่อ healthcheck · ถ้า `AUTH_PATH` ว่าง ค่า `*` จะถูกลดเหลือ loopback เท่านั้น (กัน DNS rebinding) |
@@ -269,9 +270,14 @@ docker restart iot-app
 | `PATCH` | `/api/automations/{id}` | ทั้งกฎหรือบางส่วน · `{"enabled": false}` = หยุดไว้ |
 | `DELETE` | `/api/automations/{id}` | ลบกฎ (รอบที่กำลังรออยู่ถูกยกเลิก) |
 | `POST` | `/api/automations/{id}/run` | ทำ actions ทันที ไม่ดู trigger/เงื่อนไข — ปุ่ม "ลองสั่งเลย" |
+| `GET` | `/api/house` | `{layout, custom, placements, editable, words}` — ผังเป็นเมตร ดูรูปแบบใน `app/house.py` |
+| `PUT` | `/api/house/layout` | `{"layout": {"floors": […]}}` · ตรวจทั้งผังก่อนเก็บ |
+| `DELETE` | `/api/house/layout` | กลับไปใช้ผังตั้งต้น (ตำแหน่งอุปกรณ์ยังอยู่) |
+| `PUT` | `/api/house/placements/{id}` | `{"floor": "f1", "x": 2.1, "z": 3}` · วางอุปกรณ์เอง |
+| `DELETE` | `/api/house/placements/{id}` | กลับไปวางตามชื่อห้องอัตโนมัติ |
 | `GET` | `/api/devices/{id}/history` | `?capability=temperature&hours=24&points=240` |
 | `POST` | `/api/devices/commission` | ปิดเป็นค่าเริ่มต้น (`ALLOW_HTTP_COMMISSION`) · ใช้ `make commission` แทน |
-| `WS` | `/ws` | push: `snapshot` · `devices` · `groups` · `automations` · `automation_run` · `state` · `command` · `adapter` · `ping` |
+| `WS` | `/ws` | push: `snapshot` · `devices` · `groups` · `automations` · `automation_run` · `house` · `state` · `command` · `adapter` · `ping` |
 
 ## สิ่งที่ตั้งใจออกแบบไว้แบบนี้
 
@@ -317,6 +323,14 @@ Tailwind ใช้ผ่าน arbitrary value (`bg-[var(--surface)]`) ดัง
   — เลื่อนแล้วเห็นผลลัพธ์ก่อนกด
 - *หลอดไฟที่เปิดอยู่จะเรืองแสงบนการ์ดตัวเอง* ด้วยสีเคลวินที่มันเปิดอยู่ และความเข้มตามความสว่าง
   ปลั๊ก/สวิตช์ทั่วไปเป็นเขียว มองปราดเดียวรู้ว่าห้องไหนเปิดอะไรอยู่
+
+**บ้าน 3D วาดในเบราว์เซอร์ ไม่ใช่บน Pi** ([static/house3d.js](static/house3d.js)) —
+Pi ส่งแค่ผังบ้านเป็น JSON ไม่กี่ KB กับสถานะผ่าน `/ws` ตัวเดิม ส่วน three.js (~170 KB หลัง gzip)
+โหลดเฉพาะตอนเปิดหน้านี้ครั้งแรกแล้ว cache ถาวร หน้าอื่นไม่ดาวน์โหลดเลย
+และวาดใหม่เฉพาะตอนมีอะไรเปลี่ยน (กล้องขยับ, อุปกรณ์เปลี่ยนสถานะ) ไม่ได้วาดวนตลอดเวลา
+ผนังคิดเองจากขอบห้องที่ชนกัน ผังจึงเก็บแค่สี่เหลี่ยมของห้อง ประตู และคู่ห้องที่เปิดโล่งถึงกัน
+อุปกรณ์ที่ไม่ได้วางเองจะไปอยู่ในห้องที่ชื่อตรงกับชื่อห้องของอุปกรณ์ ("ห้องนอนชั้นบน" → ห้องนอนชั้น 2)
+แอร์/ปลั๊ก/สวิตช์/เซนเซอร์ติดผนังที่ใกล้สุดเอง ไฟที่วางชิดรั้วจะไปอยู่บนรั้ว
 
 **Migration มี checksum + advisory lock** แก้ไฟล์ที่ apply ไปแล้วจะ error ทันที
 และสอง instance ที่ start พร้อมกันจะไม่ชนกัน — ไฟล์ที่ขึ้นต้นด้วย `-- migrate:no-transaction`

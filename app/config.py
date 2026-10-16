@@ -104,6 +104,9 @@ class Settings(BaseSettings):
     device_groups_path: str = str(ROOT / "data" / "groups.json")
     #: Automation rules. Set empty to switch automations off entirely.
     automations_path: str = str(ROOT / "data" / "automations.json")
+    #: The 3D house page's floor plan and where each device sits on it. Set
+    #: empty to keep the built-in plan and placements guessed from rooms.
+    house_path: str = str(ROOT / "data" / "house.json")
     #: The house's clock, for time rules. The container itself runs on UTC,
     #: so "22:30" would otherwise mean 05:30 in Bangkok.
     timezone: str = "Asia/Bangkok"

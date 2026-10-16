@@ -28,11 +28,13 @@ from app.db import Database
 from app.hub import Hub
 from app.i18n import jinja_translate, lang_of
 from app.groups import GroupStore
+from app.house import HouseStore
 from app.labels import LabelStore
 from app.routes_auth import router as auth_router
 from app.routes_devices import router as devices_router
 from app.routes_automations import router as automations_router
 from app.routes_groups import router as groups_router
+from app.routes_house import router as house_router
 from app.telemetry import Recorder
 
 logging.basicConfig(
@@ -195,6 +197,10 @@ async def lifespan(app: FastAPI):
     groups = GroupStore(settings.device_groups_path or None)
     groups.load()
 
+    house = HouseStore(settings.house_path or None)
+    house.load()
+    app.state.house = house
+
     auth = AuthStore(settings.auth_path or None, settings.session_secret)
     auth.load()
     app.state.auth = auth
@@ -296,6 +302,7 @@ app.include_router(auth_router)
 app.include_router(devices_router)
 app.include_router(groups_router)
 app.include_router(automations_router)
+app.include_router(house_router)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 

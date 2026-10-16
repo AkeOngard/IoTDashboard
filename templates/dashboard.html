@@ -237,6 +237,9 @@
       <a href="#/" class="nav-link" :aria-current="page === 'overview' ? 'page' : null">
         <span class="ic h-5 w-5" x-html="icon('overview')"></span>{{ _('ภาพรวม') }}
       </a>
+      <a href="#/house" class="nav-link" :aria-current="page === 'house' ? 'page' : null">
+        <span class="ic h-5 w-5" x-html="icon('house3d')"></span>{{ _('บ้าน 3D') }}
+      </a>
       <a href="#/devices" class="nav-link" :aria-current="page === 'devices' || page === 'device' ? 'page' : null">
         <span class="ic h-5 w-5" x-html="icon('devices')"></span>{{ _('อุปกรณ์') }}
       </a>
@@ -499,6 +502,301 @@
                 </section>
               </template>
             </div>
+          </template>
+        </div>
+      </template>
+
+      <!-- ── house (3D) ───────────────────────────────────────────────── -->
+      <!-- Drawn in this browser by static/house3d.js, fetched (with three.js)
+           the first time this page opens: the Pi sends the plan as a few KB
+           of JSON and the states it was sending anyway. -->
+      <template x-if="page === 'house'">
+        <div class="flex flex-col gap-4" @keydown.escape.window="house.placing ? (house.placing = null) : (house.selected = null)">
+          <div class="flex flex-wrap items-end gap-3">
+            <div class="mr-auto min-w-0">
+              <h1 class="text-[26px] font-semibold leading-tight tracking-tight md:text-[30px]">{{ _('บ้าน 3D') }}</h1>
+              <p class="mt-1 text-[14px] text-[var(--muted)]" x-text="houseLine"></p>
+            </div>
+            <div class="seg no-scrollbar max-w-full overflow-x-auto" role="group" aria-label="{{ _('ชั้น') }}"
+                 x-show="houseFloors.length">
+              <template x-for="f in houseFloors" :key="f.id">
+                <button @click="setHouseFloor(f.id)" :aria-pressed="houseFloorShown === f.id ? 'true' : 'false'" x-text="f.label"></button>
+              </template>
+            </div>
+            <template x-if="house.editable && house.layout">
+              <div class="seg no-scrollbar max-w-full overflow-x-auto" role="group" aria-label="{{ _('สิ่งที่ทำ') }}">
+                <button @click="setHouseMode('view')" :aria-pressed="house.mode === 'view' ? 'true' : 'false'">{{ _('ดูและสั่งงาน') }}</button>
+                <button @click="setHouseMode('arrange')" :aria-pressed="house.mode === 'arrange' ? 'true' : 'false'">{{ _('จัดวางอุปกรณ์') }}</button>
+                <button @click="setHouseMode('plan')" :aria-pressed="house.mode === 'plan' ? 'true' : 'false'">{{ _('แก้ผังห้อง') }}</button>
+              </div>
+            </template>
+          </div>
+
+          <div class="grid items-start gap-4" :class="house.mode !== 'view' && 'xl:grid-cols-[minmax(0,1fr)_360px]'">
+            <!-- house3d.js puts its canvas and the labels in here. -->
+            <div class="house-stage" x-init="mountHouse($el)" x-effect="houseSync()"
+                 data-module="{{ static_url('house3d.js') }}"
+                 data-three="{{ static_url('vendor/three-0.170.0.module.min.js') }}">
+
+              <template x-if="!house.layout || house.viewError">
+                <div class="house-ui inset-0 flex items-center justify-center px-8 text-center text-[14px]"
+                     :class="house.error || house.viewError ? 'text-[var(--danger-text)]' : 'text-[var(--faint)]'"
+                     x-text="house.viewError || house.error || tr('กำลังโหลด…')"></div>
+              </template>
+
+              <!-- What a tap will do, while it does something unusual. -->
+              <div class="house-ui left-3 right-14 top-3 flex">
+                <template x-if="house.placing && deviceById(house.placing)">
+                  <div class="pane dense flex min-h-10 max-w-full items-center gap-2 py-1 pl-3.5 pr-1 text-[13px]">
+                    <span class="min-w-0 flex-1" x-text="tr('แตะจุดในบ้านเพื่อวาง {name}', { name: deviceById(house.placing).name })"></span>
+                    <button class="btn !h-8 shrink-0 !px-3 text-[13px] text-[var(--accent-text)]" @click="house.placing = null">{{ _('ยกเลิก') }}</button>
+                  </div>
+                </template>
+                <template x-if="!house.placing && house.mode === 'arrange'">
+                  <p class="pane dense px-3.5 py-2 text-[13px] text-[var(--muted)]">{{ _('ลากป้ายเพื่อย้ายอุปกรณ์') }}</p>
+                </template>
+                <template x-if="house.mode === 'plan'">
+                  <p class="pane dense px-3.5 py-2 text-[13px] text-[var(--muted)]">{{ _('แตะห้องในภาพเพื่อแก้ขนาด') }}</p>
+                </template>
+              </div>
+
+              <button class="house-ui right-3 top-3 flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--line)] bg-[var(--pane-dense)] text-[var(--muted)] hover:text-[var(--text)]"
+                      @click="houseResetView()" :aria-label="tr('มุมมองเริ่มต้น')" :title="tr('มุมมองเริ่มต้น')">
+                <span class="ic h-5 w-5" x-html="icon('fit')"></span>
+              </button>
+
+              <!-- The device tapped on the house, with its controls. A list of
+                   one rather than x-if: while the card is being taken down
+                   its bindings run once more, and `d` still has its device. -->
+              <template x-for="d in (houseDevice && !house.placing ? [houseDevice] : [])" :key="d.id">
+                <div class="house-card pane dense" role="group" :aria-label="d.name">
+                  <div class="flex items-center gap-3">
+                    <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border"
+                          :class="tileOn(d) ? 'border-[var(--accent-line)] bg-[var(--accent-soft)]' : 'border-[var(--line)] bg-[var(--tile)]'">
+                      <span class="dev-icon" :class="d.online && iconActive(d) && 'is-active'"
+                            :style="iconStyle(d)" x-html="devIcon(d)"></span>
+                    </span>
+                    <div class="min-w-0 flex-1">
+                      <p class="truncate text-[16px] font-medium" x-text="d.name"></p>
+                      <p class="truncate text-[13px] text-[var(--faint)]" x-text="roomLabel(d.room) + ' · ' + summary(d)"></p>
+                    </div>
+                    <template x-if="isSwitchable(d)">
+                      <button class="toggle" :class="isPending(d.id, 'switch') && 'is-pending'"
+                              :aria-pressed="isOn(d) ? 'true' : 'false'"
+                              :aria-label="(isOn(d) ? tr('ปิด ') : tr('เปิด ')) + d.name"
+                              :disabled="!d.online" @click="toggle(d)"></button>
+                    </template>
+                    <button class="-mr-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[var(--faint)] hover:bg-[var(--tile-hover)] hover:text-[var(--text)]"
+                            @click="house.selected = null" aria-label="{{ _('ปิดหน้าต่างนี้') }}">
+                      <span class="ic h-4 w-4" x-html="icon('close')"></span>
+                    </button>
+                  </div>
+
+                  <template x-for="cap in sliderCaps(d)" :key="cap">
+                    <div class="mt-3" :class="isPending(d.id, cap) ? 'is-pending' : ''">
+                      <div class="flex items-baseline justify-between gap-3 text-[13px]">
+                        <span class="text-[var(--muted)]" x-text="LABEL[cap] || cap"></span>
+                        <span class="tabular-nums">
+                          <span x-text="shown(d.id, cap) ?? '—'"></span><span x-text="UNIT[cap] || ''"></span>
+                        </span>
+                      </div>
+                      <input type="range" class="slider"
+                             :min="RANGE[cap][0]" :max="RANGE[cap][1]" :step="RANGE[cap][2]"
+                             :value="shown(d.id, cap) ?? RANGE[cap][0]"
+                             :style="sliderStyle(d, cap)"
+                             :aria-label="(LABEL[cap] || cap) + ' ' + d.name"
+                             @input="slide(d, cap, $event.target.value)">
+                    </div>
+                  </template>
+
+                  <template x-if="isAc(d) && d.online && isOn(d)">
+                    <div class="mt-3 flex flex-col gap-3">
+                      <div class="flex items-center justify-between gap-3"
+                           :class="isPending(d.id, 'target_temperature') && 'is-pending'">
+                        <p class="text-[26px] font-medium leading-tight tabular-nums">
+                          <span x-text="shown(d.id, 'target_temperature') ?? '—'"></span><span
+                            class="ml-0.5 text-[14px] font-normal text-[var(--faint)]">°C</span>
+                        </p>
+                        <div class="flex gap-2">
+                          <button class="btn btn-ghost !h-10 !w-10 !p-0" @click="nudge(d, -1)"
+                                  :disabled="shown(d.id, 'target_temperature') <= RANGE.target_temperature[0]"
+                                  :aria-label="tr('ลดอุณหภูมิ') + ' ' + d.name">
+                            <span class="ic h-5 w-5" x-html="icon('minus')"></span>
+                          </button>
+                          <button class="btn btn-ghost !h-10 !w-10 !p-0" @click="nudge(d, 1)"
+                                  :disabled="shown(d.id, 'target_temperature') >= RANGE.target_temperature[1]"
+                                  :aria-label="tr('เพิ่มอุณหภูมิ') + ' ' + d.name">
+                            <span class="ic h-5 w-5" x-html="icon('plus')"></span>
+                          </button>
+                        </div>
+                      </div>
+                      <div class="seg no-scrollbar max-w-full overflow-x-auto" role="group" :aria-label="LABEL.hvac_mode"
+                           :class="isPending(d.id, 'hvac_mode') && 'is-pending'">
+                        <template x-for="w in choicesFor(d, 'hvac_mode')" :key="w">
+                          <button @click="send(d.id, 'hvac_mode', w)"
+                                  :aria-pressed="shown(d.id, 'hvac_mode') === w ? 'true' : 'false'"
+                                  x-text="choiceText('hvac_mode', w)"></button>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+
+                  <template x-if="!isSwitchable(d) && heroCaps(d).length">
+                    <div class="mt-3 grid grid-cols-2 gap-3">
+                      <template x-for="cap in heroCaps(d)" :key="cap">
+                        <div>
+                          <p class="text-[12px] text-[var(--faint)]" x-text="capLabel(d, cap)"></p>
+                          <p class="text-[22px] font-medium leading-tight tabular-nums" :style="'color: ' + readingColor(d.id, cap)"
+                             x-text="reading(d.id, cap)"></p>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+
+                  <!-- Arranging: which floor, or back to the room's own spot. -->
+                  <template x-if="house.mode === 'arrange' && housePlaces[d.id]">
+                    <div class="mt-3 flex flex-wrap items-center gap-2 border-t border-[var(--line)] pt-3">
+                      <div class="seg" role="group" aria-label="{{ _('ชั้น') }}" x-show="houseLayout.floors.length > 1">
+                        <template x-for="f in houseLayout.floors" :key="f.id">
+                          <button class="!h-8 !px-2.5" @click="houseMoveFloor(d, f.id)"
+                                  :aria-pressed="housePlaces[d.id]?.floor === f.id ? 'true' : 'false'" x-text="f.name"></button>
+                        </template>
+                      </div>
+                      <template x-if="housePlaces[d.id] && !housePlaces[d.id].auto">
+                        <button class="btn btn-ghost !h-10 !px-3 text-[13px]" @click="houseUnplace(d.id)">{{ _('วางตามห้องอัตโนมัติ') }}</button>
+                      </template>
+                    </div>
+                  </template>
+
+                  <a :href="deviceHref(d)" class="mt-3 inline-flex items-center gap-1 text-[13px] text-[var(--accent-text)] hover:underline">
+                    {{ _('ดูรายละเอียด') }}<span class="ic h-3.5 w-3.5" x-html="icon('chevron')"></span>
+                  </a>
+                </div>
+              </template>
+            </div>
+
+            <!-- Arranging: every device, the ones without a place first. -->
+            <template x-if="house.mode === 'arrange'">
+              <section class="pane flex flex-col p-4" aria-labelledby="tray-title">
+                <h2 id="tray-title" class="text-[16px] font-semibold">{{ _('จัดวางอุปกรณ์') }}</h2>
+                <p class="mt-1 text-[13px] leading-relaxed text-[var(--muted)]">
+                  {{ _('อุปกรณ์จะถูกวางตามชื่อห้องให้เอง ลากป้ายในภาพเพื่อย้าย หรือเลือกจากรายการแล้วแตะจุดในบ้าน') }}
+                </p>
+                <div class="-mx-2 mt-3 max-h-[52vh] overflow-y-auto">
+                  <template x-for="d in houseTray" :key="d.id">
+                    <button class="flex min-h-11 w-full items-center gap-3 rounded-xl px-2 text-left hover:bg-[var(--tile-hover)]"
+                            :class="house.placing === d.id && 'bg-[var(--accent-soft)]'"
+                            :aria-pressed="house.placing === d.id ? 'true' : 'false'" @click="startPlacing(d)">
+                      <span class="dev-icon !h-5 !w-5" x-html="devIcon(d)"></span>
+                      <span class="min-w-0 flex-1 truncate text-[15px]" x-text="d.name"></span>
+                      <span class="shrink-0 text-[12px]" :class="housePlaces[d.id] ? 'text-[var(--faint)]' : 'text-[var(--warn-text)]'"
+                            x-text="housePlaceText(d)"></span>
+                    </button>
+                  </template>
+                </div>
+              </section>
+            </template>
+
+            <!-- The plan: rooms in metres, and which rooms open into which. -->
+            <template x-if="house.mode === 'plan' && house.draft">
+              <section class="pane flex flex-col p-4" aria-labelledby="plan-title">
+                <div class="flex items-baseline justify-between gap-2">
+                  <h2 id="plan-title" class="text-[16px] font-semibold">{{ _('แก้ผังห้อง') }}</h2>
+                  <span class="text-[12px] text-[var(--faint)]">{{ _('หน่วยเป็นเมตร') }}</span>
+                </div>
+                <p class="mt-1 text-[13px] leading-relaxed text-[var(--muted)]">
+                  {{ _('x วัดจากผนังซ้ายเมื่อยืนมองจากถนน z วัดจากผนังหน้าบ้านเข้าไปข้างหลัง (หน้าบ้านติดลบ) ห้องที่ซ้อนอยู่ในห้องใหญ่ เช่น ห้องน้ำในครัว ก็วางซ้อนได้เลย') }}
+                </p>
+                <div class="-mx-1 mt-3 max-h-[62vh] overflow-y-auto px-1">
+                  <template x-for="floor in house.draft.floors" :key="floor.id">
+                    <div class="mb-5">
+                      <p class="mb-2 text-[14px] font-semibold" x-text="floor.name"></p>
+                      <template x-for="room in floor.rooms" :key="room.id">
+                        <div :id="'plan-' + floor.id + '-' + room.id" class="tile mb-2 p-2.5"
+                             :class="house.focus === floor.id + ':' + room.id && '!border-[var(--accent)]'"
+                             @focusin="houseFocus(floor.id, room.id)">
+                          <div class="flex items-center gap-1.5">
+                            <input class="field !h-9 min-w-0 flex-1 !px-2.5 !text-[14px]" x-model="room.name" maxlength="60"
+                                   :aria-label="tr('ชื่อห้อง')">
+                            <select class="field !h-9 !w-auto !px-2 !text-[14px]" x-model="room.kind" :aria-label="tr('ประเภทห้อง')">
+                              <template x-for="k in ROOM_KINDS" :key="k.id">
+                                <option :value="k.id" :selected="k.id === room.kind" x-text="k.label"></option>
+                              </template>
+                            </select>
+                            <button class="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-[var(--faint)] hover:bg-[var(--tile-hover)] hover:text-[var(--danger-text)]"
+                                    @click="removeRoom(floor, room)" :aria-label="tr('ลบห้อง') + ' ' + room.name">
+                              <span class="ic h-4 w-4" x-html="icon('close')"></span>
+                            </button>
+                          </div>
+                          <div class="mt-2 grid grid-cols-4 gap-1.5">
+                            <template x-for="k in ['x', 'z', 'w', 'd']" :key="k">
+                              <label class="block min-w-0">
+                                <span class="block text-[11.5px] text-[var(--faint)]" x-text="PLAN_FIELD[k]"></span>
+                                <input type="number" step="0.1" inputmode="decimal" class="field !h-9 !px-2 !text-[14px] tabular-nums"
+                                       x-model.number="room[k]">
+                              </label>
+                            </template>
+                          </div>
+                        </div>
+                      </template>
+                      <button class="btn btn-ghost !h-9 w-full text-[14px]" @click="addRoom(floor)">
+                        <span class="ic h-4 w-4" x-html="icon('plus')"></span>{{ _('เพิ่มห้อง') }}
+                      </button>
+
+                      <p class="mb-1.5 mt-4 text-[13px] text-[var(--faint)]">{{ _('ประตูและห้องที่เปิดโล่งถึงกัน') }}</p>
+                      <template x-for="link in planLinks(floor)" :key="link.key">
+                        <div class="mb-1.5 flex items-center gap-1.5">
+                          <select class="field !h-9 min-w-0 flex-1 !px-2 !text-[13px]" @change="setLink(floor, link, 'a', $event.target.value)"
+                                  :aria-label="tr('ห้องหนึ่ง')">
+                            <template x-for="r in floor.rooms" :key="r.id">
+                              <option :value="r.id" :selected="r.id === link.a" x-text="r.name"></option>
+                            </template>
+                          </select>
+                          <select class="field !h-9 !w-auto !px-2 !text-[13px]" @change="setLink(floor, link, 'type', $event.target.value)"
+                                  :aria-label="tr('แบบ')">
+                            <option value="door" :selected="link.type === 'door'">{{ _('ประตู') }}</option>
+                            <option value="open" :selected="link.type === 'open'">{{ _('โล่ง') }}</option>
+                          </select>
+                          <select class="field !h-9 min-w-0 flex-1 !px-2 !text-[13px]" @change="setLink(floor, link, 'b', $event.target.value)"
+                                  :aria-label="tr('อีกห้อง')">
+                            <template x-for="r in floor.rooms" :key="r.id">
+                              <option :value="r.id" :selected="r.id === link.b" x-text="r.name"></option>
+                            </template>
+                          </select>
+                          <button class="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-[var(--faint)] hover:bg-[var(--tile-hover)] hover:text-[var(--danger-text)]"
+                                  @click="removeLink(floor, link)" aria-label="{{ _('ลบ') }}">
+                            <span class="ic h-4 w-4" x-html="icon('close')"></span>
+                          </button>
+                        </div>
+                      </template>
+                      <button class="btn btn-ghost !h-9 w-full text-[14px]" @click="addLink(floor)" :disabled="floor.rooms.length < 2">
+                        <span class="ic h-4 w-4" x-html="icon('plus')"></span>{{ _('เพิ่มประตู') }}
+                      </button>
+                    </div>
+                  </template>
+                </div>
+                <div class="mt-2 border-t border-[var(--line)] pt-4">
+                  <p x-show="house.planError" class="mb-3 text-[14px] text-[var(--danger-text)]" x-text="house.planError"></p>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <button class="btn btn-accent" @click="savePlan()" :disabled="house.busy"
+                            x-text="house.busy ? tr('กำลังบันทึก…') : tr('บันทึกผัง')"></button>
+                    <button class="btn" @click="setHouseMode('view')">{{ _('ยกเลิก') }}</button>
+                    <template x-if="house.custom">
+                      <button class="btn ml-auto text-[14px] text-[var(--danger-text)]" @click="resetPlan()" :disabled="house.busy">{{ _('ใช้ผังตั้งต้น') }}</button>
+                    </template>
+                  </div>
+                </div>
+              </section>
+            </template>
+          </div>
+
+          <template x-if="house.mode === 'view' && house.layout && houseUnplaced.length">
+            <p class="text-[13px] text-[var(--faint)]">
+              <span x-text="tr('อีก {n} อุปกรณ์ยังไม่ได้วางในบ้าน เพราะชื่อห้องไม่ตรงกับผัง', { n: houseUnplaced.length })"></span>
+              <template x-if="house.editable">
+                <button class="ml-1 text-[var(--accent-text)] hover:underline" @click="setHouseMode('arrange')">{{ _('จัดวางเลย') }}</button>
+              </template>
+            </p>
           </template>
         </div>
       </template>
@@ -1110,10 +1408,13 @@
   </div>
 
   <!-- ── tab bar (phone) ─────────────────────────────────────────────── -->
-  <nav class="pane fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-20 grid grid-cols-5 gap-0.5 p-1 md:hidden"
+  <nav class="pane fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-20 grid grid-cols-6 gap-0.5 p-1 md:hidden"
        aria-label="{{ _('เมนูหลัก') }}">
     <a href="#/" class="tab-link" :aria-current="page === 'overview' ? 'page' : null">
       <span class="ic h-6 w-6" x-html="icon('overview')"></span>{{ _('ภาพรวม') }}
+    </a>
+    <a href="#/house" class="tab-link" :aria-current="page === 'house' ? 'page' : null">
+      <span class="ic h-6 w-6" x-html="icon('house3d')"></span>{{ _('บ้าน 3D') }}
     </a>
     <a href="#/devices" class="tab-link" :aria-current="page === 'devices' || page === 'device' ? 'page' : null">
       <span class="ic h-6 w-6" x-html="icon('devices')"></span>{{ _('อุปกรณ์') }}

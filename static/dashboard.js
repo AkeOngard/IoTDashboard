@@ -12,6 +12,14 @@
  * Pages are hash routes (#/devices, #/device/<id>, #/alerts) inside this one
  * document, so moving between them never asks the Pi for anything.
  */
+
+/* The 3D house view (static/house3d.js) while its page is open. Kept out of
+ * the component's data: Alpine would wrap the whole three.js scene in
+ * reactive proxies. `houseToken` tells a view that finished loading after
+ * its page was left that nobody wants it any more. */
+let houseView = null;
+let houseToken = 0;
+
 function dashboard() {
   return {
     // Readings that deserve the large type.
@@ -125,7 +133,19 @@ function dashboard() {
     automations: { enabled: true, rules: [], log: [], stats: {} },
     // The rule open in the editor: a copy, so a broadcast never clobbers typing.
     ruleEdit: { open: false, id: null, draft: null, busy: false, error: '' },
-    // Where we are: 'overview' | 'devices' | 'device' | 'groups' | 'automations' | 'alerts'.
+    /* The 3D house page. `layout` and `placements` are the Pi's (fetched when
+     * the page first opens); `draft` is the plan being edited, drawn live in
+     * place of `layout`. `floor` is 'all' or a floor id; `mode` is 'view',
+     * 'arrange' (move devices) or 'plan' (edit rooms). */
+    house: {
+      loaded: false, loading: false, error: '', viewError: '', viewReady: 0,
+      layout: null, custom: false, placements: {}, editable: false,
+      floor: 'all', mode: 'view', selected: null, placing: null, focus: null,
+      draft: null, busy: false, planError: '',
+      // Room-name words for automatic placement, from app/house.py.
+      words: { kinds: [], upper: [], lower: [] },
+    },
+    // Where we are: 'overview' | 'house' | 'devices' | 'device' | 'groups' | 'automations' | 'alerts'.
     page: 'overview', detailId: null,
     // Devices page filter: 'all' | 'online' | 'attention'.
     filter: 'all',
@@ -153,6 +173,7 @@ function dashboard() {
       this.canBlur = root.getAttribute('data-can-blur') !== 'no';
       this.syncThemeColor();
       try { this.pins = JSON.parse(localStorage.getItem('iot.pins') || '[]'); } catch (e) { this.pins = []; }
+      try { this.house.floor = localStorage.getItem('iot.houseFloor') || 'all'; } catch (e) { /* private mode */ }
       this.connect();
       // Drives the clock, the greeting and the staleness labels. The first
       // tick lands on the next whole minute so the big clock turns over on
@@ -225,6 +246,10 @@ function dashboard() {
       } else if (msg.type === 'adapter') {
         this.adapterConnected = msg.connected;
         this.adapterName = msg.adapter;
+      } else if (msg.type === 'house') {
+        // The plan or a device's place changed on some dashboard. Only one
+        // that has the house page loaded needs the new copy.
+        if (this.house.loaded) this.loadHouse();
       } else if (msg.type === 'command') {
         const k = this.key(msg.device_id, msg.capability);
         if (msg.status === 'pending') {
@@ -252,10 +277,14 @@ function dashboard() {
       } else {
         // detailId is left as it was: the device page's bindings run once
         // more while it is being torn down, and they need their device.
-        this.page = ['devices', 'groups', 'automations', 'alerts'].includes(page) ? page : 'overview';
+        this.page = ['house', 'devices', 'groups', 'automations', 'alerts'].includes(page) ? page : 'overview';
         // #/automations/<id> opens that rule.
         if (page === 'automations' && id) this.$nextTick(() => this.openRule(decodeURIComponent(id)));
+        // #/house/<id> shows that device on the house.
+        if (page === 'house' && id) this.house.selected = decodeURIComponent(id);
       }
+      // Leaving the house gives its WebGL context and memory back at once.
+      if (this.page !== 'house') this.unmountHouse();
       this.editing = null;
       window.scrollTo(0, 0);
       this.$nextTick(() => this.ensureChart());
@@ -1222,6 +1251,460 @@ function dashboard() {
       }
     },
 
+    // -------------------------------------------------------------- house
+
+    ROOM_KINDS: [
+      { id: 'living', label: tr('ห้องนั่งเล่น') }, { id: 'bed', label: tr('ห้องนอน') },
+      { id: 'kitchen', label: tr('ห้องครัว') }, { id: 'bath', label: tr('ห้องน้ำ') },
+      { id: 'hall', label: tr('โถง/บันได') }, { id: 'room', label: tr('ห้องอื่น ๆ') },
+      { id: 'yard', label: tr('ลานนอกบ้าน') }, { id: 'carport', label: tr('ที่จอดรถ') },
+    ],
+    PLAN_FIELD: { x: 'x', z: 'z', w: tr('กว้าง'), d: tr('ลึก') },
+    // What an AC glows in on the house, by mode: MODE_COLOR as numbers.
+    AC_RGB: { cool: [98, 166, 232], heat: [229, 111, 92], dry: [79, 189, 232], fan: [205, 203, 220], auto: [139, 124, 246] },
+    ACCENT_RGB: [139, 124, 246],
+    // A lamp with no colour temperature to go by: a plain warm bulb.
+    WARM_RGB: [255, 196, 128],
+
+    async loadHouse() {
+      const h = this.house;
+      h.loading = true;
+      try {
+        const body = await apiFetch('/api/house');
+        h.layout = body.layout;
+        h.custom = body.custom;
+        h.placements = body.placements || {};
+        h.editable = body.editable;
+        if (body.words) h.words = body.words;
+        h.loaded = true;
+        h.error = '';
+      } catch (err) {
+        h.error = err.message;
+      } finally {
+        h.loading = false;
+      }
+    },
+
+    /** Called by the stage's x-init: fetch the plan, import the drawing
+     *  code and three.js (each once per browser, cached for good after),
+     *  and start drawing. */
+    mountHouse(el) {
+      if (!this.house.loaded && !this.house.loading) this.loadHouse();
+      const token = ++houseToken;
+      this.house.viewError = '';
+      import(el.dataset.module)
+        .then(mod => mod.createHouse(el, {
+          threeUrl: el.dataset.three,
+          theme: this.theme,
+          onSelect: (id) => this.houseSelect(id),
+          onMove: (id, floor, x, z) => this.housePut(id, { floor, x, z }),
+          onPlace: (id, floor, x, z) => {
+            this.house.placing = null;
+            this.house.selected = id;
+            this.housePut(id, { floor, x, z });
+          },
+          onRoom: (floor, room) => this.houseFocus(floor, room, true),
+        }))
+        .then(view => {
+          if (token !== houseToken || !el.isConnected) { view.destroy(); return; }
+          houseView = view;
+          this.house.viewReady++;
+        })
+        .catch(err => {
+          console.error('3D house:', err);
+          if (token === houseToken) this.house.viewError = tr('แสดงภาพ 3D ไม่ได้ — เบราว์เซอร์นี้อาจไม่รองรับ WebGL');
+        });
+    },
+
+    unmountHouse() {
+      houseToken++;
+      if (houseView) { houseView.destroy(); houseView = null; }
+    },
+
+    /** The stage's x-effect: everything the drawing shows, handed over in
+     *  one go. Reading it all here is what makes Alpine call this again
+     *  whenever any of it changes; the view redoes only what did. */
+    houseSync() {
+      const h = this.house;
+      const layout = this.houseLayout;
+      const state = {
+        layout: layout ? JSON.parse(JSON.stringify(layout)) : null,
+        floor: h.floor, mode: h.mode, theme: this.theme,
+        selected: h.selected, placing: h.placing, focus: h.focus,
+        pins: this.housePins,
+      };
+      if (h.viewReady && houseView) houseView.update(state);
+    },
+
+    houseResetView() { if (houseView) houseView.fit(); },
+
+    /** The plan on screen: the one being edited, or the Pi's. */
+    get houseLayout() {
+      return this.house.mode === 'plan' && this.house.draft ? this.house.draft : this.house.layout;
+    },
+
+    get houseFloors() {
+      const layout = this.houseLayout;
+      if (!layout || layout.floors.length < 2) return [];
+      return [{ id: 'all', label: tr('ทั้งบ้าน') }].concat(layout.floors.map(f => ({ id: f.id, label: f.name })));
+    },
+
+    /** The floor button that is lit: a floor that has gone shows the whole house. */
+    get houseFloorShown() {
+      const layout = this.houseLayout;
+      return layout && layout.floors.some(f => f.id === this.house.floor) ? this.house.floor : 'all';
+    },
+
+    setHouseFloor(id) {
+      this.house.floor = id;
+      try { localStorage.setItem('iot.houseFloor', id); } catch (e) { /* private mode */ }
+    },
+
+    setHouseMode(mode) {
+      const h = this.house;
+      if (mode === h.mode) return;
+      if (h.mode === 'plan' && h.draft && JSON.stringify(h.draft) !== JSON.stringify(h.layout)
+          && !window.confirm(tr('ทิ้งผังห้องที่แก้ไว้แต่ยังไม่ได้บันทึก?'))) return;
+      h.placing = null;
+      h.focus = null;
+      h.planError = '';
+      h.draft = mode === 'plan' && h.layout ? JSON.parse(JSON.stringify(h.layout)) : null;
+      if (mode === 'plan') h.selected = null;
+      h.mode = mode;
+    },
+
+    houseSelect(id) {
+      if (this.house.mode === 'plan') return;
+      this.house.selected = id;
+    },
+
+    get houseDevice() {
+      return this.house.selected ? this.deviceById(this.house.selected) : null;
+    },
+
+    /** Numbers out of a plan room, however its fields were typed. */
+    houseNum(room) {
+      const n = (v, lo) => Math.max(lo, Number.isFinite(+v) && v !== '' ? +v : lo);
+      return { ...room, x: n(room.x, -1e9), z: n(room.z, -1e9), w: n(room.w, 0.5), d: n(room.d, 0.5) };
+    },
+
+    /** The plan room a device's room name means, or null: the room of that
+     *  name, else one of the kind its words say ("ห้องนอนชั้นบน" is an
+     *  upstairs bedroom; the word lists come from app/house.py). */
+    houseRoomFor(layout, roomName) {
+      if (!roomName || roomName === this.UNASSIGNED) return null;
+      const norm = (s) => String(s || '').toLowerCase().replace(/[\s_.\-]+/g, '');
+      const want = norm(roomName);
+      if (!want) return null;
+      const all = layout.floors.flatMap(floor => floor.rooms.map(room => ({ floor, room, name: norm(room.name) })));
+      const named = all.find(c => c.name === want)
+        || all.find(c => c.name && (c.name.includes(want) || want.includes(c.name)));
+      if (named) return named;
+      const words = this.house.words;
+      const kind = (words.kinds.find(([, list]) => list.some(w => want.includes(w))) || [])[0];
+      let pool = all.filter(c => c.room.kind === kind);
+      if (!pool.length) return null;
+      const upper = words.upper.some(w => want.includes(w));
+      const lower = words.lower.some(w => want.includes(w));
+      if (upper || lower) {
+        const level = (c) => layout.floors.indexOf(c.floor);
+        const narrowed = pool.filter(c => (upper ? level(c) > 0 : level(c) === 0));
+        if (narrowed.length) pool = narrowed;
+      }
+      const digit = (want.match(/\d+/) || [])[0];
+      return (digit && pool.find(c => (c.name.match(/\d+/) || [])[0] === digit)) || pool[0];
+    },
+
+    /** Spots for the devices that share a room: an even grid away from the
+     *  walls and out of any smaller room inside it, and for an outdoor lamp,
+     *  the fence's pillars -- the gate's first. */
+    houseSpots(floor, room, devices) {
+      const r = this.houseNum(room);
+      const rooms = floor.rooms.map(q => this.houseNum(q)).sort((a, b) => a.w * a.d - b.w * b.d);
+      const mine = (x, z) => {
+        const hit = rooms.find(q => x > q.x && x < q.x + q.w && z > q.z && z < q.z + q.d);
+        return !!hit && hit.id === room.id;
+      };
+      const round = (p) => ({ x: Math.round(p.x * 100) / 100, z: Math.round(p.z * 100) / 100 });
+      const pad = Math.min(0.6, r.w / 4, r.d / 4);
+      const cols = Math.max(1, Math.round(Math.sqrt((devices.length * r.w) / r.d)));
+      const rows = Math.max(1, Math.ceil(devices.length / cols));
+      const free = [];
+      for (let j = 0; j < 9; j++) {
+        for (let i = 0; i < 9; i++) {
+          const x = r.x + pad + ((r.w - 2 * pad) * (i + 0.5)) / 9, z = r.z + pad + ((r.d - 2 * pad) * (j + 0.5)) / 9;
+          if (mine(x, z)) free.push({ x, z });
+        }
+      }
+      const pillars = [];
+      if (room.kind === 'yard') {
+        for (const f of floor.fences || []) {
+          const gates = (f.gates || []).slice().sort((a, b) => a[0] - b[0]);
+          const runs = [];
+          let at = +f.x0;
+          for (const [a, b] of gates) { if (a > at) runs.push([at, +a]); at = Math.max(at, +b); }
+          if (+f.x1 > at) runs.push([at, +f.x1]);
+          for (const [a, b] of runs) {
+            const n = Math.max(1, Math.round((b - a) / 1.6));
+            for (let i = 0; i <= n; i++) {
+              const x = a + ((b - a) * i) / n;
+              const nearGate = Math.min(...gates.flat().map(g => Math.abs(g - x)), 99);
+              pillars.push({ x, z: +f.z, nearGate });
+            }
+          }
+        }
+        pillars.sort((a, b) => a.nearGate - b.nearGate || b.x - a.x);
+      }
+      let lamp = 0;
+      return devices.map((d, k) => {
+        if (d.kind === 'light' && pillars.length) return round(pillars[lamp++ % pillars.length]);
+        const want = {
+          x: r.x + pad + ((r.w - 2 * pad) * ((k % cols) + 0.5)) / cols,
+          z: r.z + pad + ((r.d - 2 * pad) * (Math.floor(k / cols) + 0.5)) / rows,
+        };
+        if (mine(want.x, want.z) || !free.length) return round(want);
+        let best = free[0];
+        for (const p of free) {
+          if (Math.hypot(p.x - want.x, p.z - want.z) < Math.hypot(best.x - want.x, best.z - want.z)) best = p;
+        }
+        return round(best);
+      });
+    },
+
+    /** Where every device stands, by id: the place the operator gave it,
+     *  else a spot in the room its room name matches. `auto` says which. */
+    get housePlaces() {
+      const layout = this.houseLayout;
+      if (!layout) return {};
+      const floors = new Map(layout.floors.map(f => [f.id, f]));
+      const out = {}, waiting = new Map();
+      for (const d of this.devices) {
+        const p = this.house.placements[d.id];
+        if (p && floors.has(p.floor)) { out[d.id] = { floor: p.floor, x: p.x, z: p.z, auto: false }; continue; }
+        const at = this.houseRoomFor(layout, d.room);
+        if (!at) continue;
+        const key = at.floor.id + ':' + at.room.id;
+        if (!waiting.has(key)) waiting.set(key, { floor: at.floor, room: at.room, devices: [] });
+        waiting.get(key).devices.push(d);
+      }
+      for (const { floor, room, devices } of waiting.values()) {
+        const spots = this.houseSpots(floor, room, devices);
+        devices.forEach((d, i) => { out[d.id] = { floor: floor.id, x: spots[i].x, z: spots[i].z, auto: true }; });
+      }
+      return out;
+    },
+
+    /** One device as the drawing wants it: where, what glyph, what to say
+     *  and what colour to glow. */
+    get housePins() {
+      const places = this.housePlaces;
+      return this.devices.filter(d => places[d.id]).map(d => {
+        const at = places[d.id], kind = this.iconKind(d);
+        const active = d.online && this.iconActive(d);
+        const pin = {
+          id: d.id, name: d.name, kind, icon: ICONS['dev-' + kind], floor: at.floor, x: at.x, z: at.z,
+          online: d.online, active, text: this.summary(d), textColor: '', level: 1, rgb: null,
+          alert: d.online && this.hasIssue(d),
+          pending: Object.keys(this.pending).some(k => k.startsWith(d.id + '|')),
+        };
+        if (kind === 'light') {
+          const level = this.shown(d.id, 'brightness'), k = this.shown(d.id, 'color_temp');
+          pin.level = typeof level === 'number' ? level / 100 : 1;
+          pin.rgb = typeof k === 'number' ? this.kelvinRgb(k) : this.WARM_RGB;
+        } else if (kind === 'ac') {
+          pin.rgb = this.AC_RGB[this.shown(d.id, 'hvac_mode')] || this.AC_RGB.auto;
+        } else if (kind === 'climate') {
+          const t = this.value(d.id, 'temperature');
+          if (typeof t === 'number') {
+            pin.rgb = this.ramp(this.RAMP.temperature, t);
+            pin.textColor = this.rgb(pin.rgb);
+          }
+        } else if (kind === 'contact') {
+          pin.rgb = [230, 169, 78];
+        } else {
+          pin.rgb = this.ACCENT_RGB;
+        }
+        return pin;
+      });
+    },
+
+    /** Devices the plan has no place for yet. */
+    get houseUnplaced() {
+      const places = this.housePlaces;
+      return this.devices.filter(d => !places[d.id]);
+    },
+
+    /** The arrange list: what still needs a place first, then by name. */
+    get houseTray() {
+      const places = this.housePlaces;
+      return this.devices.slice().sort((a, b) => (!!places[a.id] - !!places[b.id]) || a.name.localeCompare(b.name, 'th'));
+    },
+
+    housePlaceText(device) {
+      const at = this.housePlaces[device.id];
+      if (!at) return tr('ยังไม่ได้วาง');
+      const floor = (this.houseLayout.floors.find(f => f.id === at.floor) || {}).name || '';
+      return at.auto ? tr('ตามห้อง · {floor}', { floor }) : floor;
+    },
+
+    /** Arranging: tap a device in the list, then a spot on the house. */
+    startPlacing(device) {
+      this.house.selected = device.id;
+      this.house.placing = this.house.placing === device.id ? null : device.id;
+      if (this.house.placing && window.innerWidth < 1024) {
+        document.querySelector('.house-stage')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
+    },
+
+    async housePut(id, at) {
+      const h = this.house, before = h.placements[id];
+      h.placements = { ...h.placements, [id]: at };
+      try {
+        await apiFetch(`/api/house/placements/${encodeURIComponent(id)}`, { method: 'PUT', json: at });
+      } catch (err) {
+        const back = { ...h.placements };
+        if (before) back[id] = before; else delete back[id];
+        h.placements = back;
+        this.toast('error', tr('บันทึกตำแหน่งไม่สำเร็จ'), err.message);
+      }
+    },
+
+    /** Give a device back to its room's automatic spot. */
+    async houseUnplace(id) {
+      const h = this.house, before = h.placements[id];
+      if (!before) return;
+      const rest = { ...h.placements };
+      delete rest[id];
+      h.placements = rest;
+      try {
+        await apiFetch(`/api/house/placements/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      } catch (err) {
+        h.placements = { ...h.placements, [id]: before };
+        this.toast('error', tr('บันทึกตำแหน่งไม่สำเร็จ'), err.message);
+      }
+    },
+
+    /** Move a device to another floor, same spot on the plan. */
+    houseMoveFloor(device, floorId) {
+      const at = this.housePlaces[device.id];
+      if (at && at.floor !== floorId) this.housePut(device.id, { floor: floorId, x: at.x, z: at.z });
+    },
+
+    // ----- plan editor
+
+    /** Light a room up on the drawing and, from a tap there, bring its row
+     *  into view -- scrolling the list only, so the drawing stays put. */
+    houseFocus(floorId, roomId, scroll) {
+      this.house.focus = floorId + ':' + roomId;
+      if (!scroll) return;
+      this.$nextTick(() => {
+        const row = document.getElementById('plan-' + floorId + '-' + roomId);
+        const list = row && row.closest('.overflow-y-auto');
+        if (!list) return;
+        const top = row.offsetTop - list.offsetTop;
+        if (top < list.scrollTop || top + row.offsetHeight > list.scrollTop + list.clientHeight) {
+          list.scrollTo({ top: top - 8, behavior: 'smooth' });
+        }
+      });
+    },
+
+    /** What is wrong with the plan being edited, said in the viewer's
+     *  words, or '' -- the Pi checks again, but names rooms by their ids. */
+    planProblem() {
+      for (const floor of this.house.draft.floors) {
+        for (const room of floor.rooms) {
+          const name = String(room.name || '').trim();
+          const fail = (text) => { this.houseFocus(floor.id, room.id, true); return text; };
+          if (!name) return fail(tr('ทุกห้องต้องมีชื่อ'));
+          if (['x', 'z', 'w', 'd'].some(k => room[k] === '' || !Number.isFinite(+room[k]))) {
+            return fail(tr('กรอกตัวเลขของ "{name}" ให้ครบ', { name }));
+          }
+          if (+room.w < 0.5 || +room.d < 0.5) return fail(tr('"{name}" ต้องกว้างและลึกอย่างน้อย 0.5 เมตร', { name }));
+        }
+      }
+      return '';
+    },
+
+    addRoom(floor) {
+      const id = 'r' + Date.now().toString(36).slice(-4) + Math.random().toString(36).slice(2, 5);
+      floor.rooms.push({ id, name: tr('ห้องใหม่'), kind: 'room', x: 0, z: 0, w: 3, d: 3 });
+      this.houseFocus(floor.id, id, true);
+    },
+
+    removeRoom(floor, room) {
+      floor.rooms = floor.rooms.filter(r => r.id !== room.id);
+      const keep = (p) => !p.includes(room.id);
+      floor.doors = (floor.doors || []).filter(keep);
+      floor.open = (floor.open || []).filter(keep);
+    },
+
+    /** A floor's doors and open sides as one list of rows. */
+    planLinks(floor) {
+      const rows = (list, type) => (list || []).map((p, i) => ({ type, i, a: p[0], b: p[1], key: type + i + ':' + p.join('|') }));
+      return rows(floor.doors, 'door').concat(rows(floor.open, 'open'));
+    },
+
+    addLink(floor) {
+      const [a, b] = floor.rooms;
+      if (!a || !b) return;
+      floor.doors = (floor.doors || []).concat([[a.id, b.id]]);
+    },
+
+    setLink(floor, link, field, value) {
+      const from = link.type === 'door' ? 'doors' : 'open';
+      const pair = [link.a, link.b];
+      if (field === 'a') pair[0] = value;
+      else if (field === 'b') pair[1] = value;
+      const type = field === 'type' ? value : link.type;
+      floor[from] = floor[from].filter((_, i) => i !== link.i);
+      const to = type === 'door' ? 'doors' : 'open';
+      floor[to] = (floor[to] || []).concat([pair]);
+    },
+
+    removeLink(floor, link) {
+      const from = link.type === 'door' ? 'doors' : 'open';
+      floor[from] = floor[from].filter((_, i) => i !== link.i);
+    },
+
+    async savePlan() {
+      const h = this.house;
+      // A door between a room and itself is a half-finished row: drop it.
+      for (const f of h.draft.floors) {
+        f.doors = (f.doors || []).filter(p => p[0] !== p[1]);
+        f.open = (f.open || []).filter(p => p[0] !== p[1]);
+      }
+      h.planError = this.planProblem();
+      if (h.planError) return;
+      h.busy = true;
+      try {
+        await apiFetch('/api/house/layout', { method: 'PUT', json: { layout: h.draft } });
+        await this.loadHouse();
+        h.draft = null;
+        h.focus = null;
+        h.mode = 'view';
+        this.toast('ok', tr('บันทึกผังห้องแล้ว'), '');
+      } catch (err) {
+        h.planError = err.message;
+      } finally {
+        h.busy = false;
+      }
+    },
+
+    async resetPlan() {
+      const h = this.house;
+      if (!window.confirm(tr('กลับไปใช้ผังตั้งต้น? ผังที่บันทึกไว้จะหายไป ส่วนตำแหน่งอุปกรณ์ยังอยู่'))) return;
+      h.busy = true; h.planError = '';
+      try {
+        await apiFetch('/api/house/layout', { method: 'DELETE' });
+        await this.loadHouse();
+        h.draft = JSON.parse(JSON.stringify(h.layout));
+      } catch (err) {
+        h.planError = err.message;
+      } finally {
+        h.busy = false;
+      }
+    },
+
     // ------------------------------------------------------------ account
 
     account: { open: false, current: '', next: '', busy: false, error: '', done: false },
@@ -1584,6 +2067,9 @@ const ICONS = (() => {
     'dev-sensor': svg('<circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none"/><path d="M6.6 6.6a7.6 7.6 0 0 0 0 10.8M17.4 6.6a7.6 7.6 0 0 1 0 10.8"/>'),
 
     home: svg('<path d="M3.5 10.5 12 3.8l8.5 6.7V20H3.5z"/><circle cx="12" cy="14" r="2.2" fill="currentColor" stroke="none"/>'),
+    // The house page: a house drawn in perspective, one side and the front.
+    house3d: svg('<path d="M2.5 11 8 5.5l5.5 5.5"/><path d="M8 5.5h8.5l5 5"/><path d="M4 9.5V20h8V9.5"/><path d="M12 20h8.5v-9.5"/><path d="M6.8 20v-4.2h2.4V20"/>'),
+    fit: svg('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>'),
     overview: svg('<rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/>'),
     devices: svg('<rect x="3" y="5" width="13" height="10" rx="1.8"/><path d="M7 19h5M9.5 15v4"/><rect x="17.5" y="9" width="4" height="10" rx="1.2"/>'),
     bell: svg('<path d="M6 16.5V11a6 6 0 1 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>'),
