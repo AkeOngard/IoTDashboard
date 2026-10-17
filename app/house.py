@@ -7,6 +7,12 @@ The front yard has negative z. A room inside another (the bathroom inside the
 kitchen) is simply a smaller rectangle on top; the walls are worked out in the
 browser from where the rectangles meet, so the plan never lists a wall.
 
+A floor also lists its lamps: the light fittings in the ceiling (or on the
+fence), each a point on the plan. A lamp lights up while the device that
+switches it is on. Which device that is gets guessed in the browser -- a
+"light" whose room name matches the lamp's room -- unless the operator ties
+the lamp to a device here, in the lamp bindings.
+
 Kept in a JSON file beside the labels and groups, for the same reason: the
 Pi-only deployment has no database. Until the operator saves a plan of their
 own the page shows DEFAULT, worded in the viewer's language, and device
@@ -32,6 +38,7 @@ MAX_ROOMS = 40
 MAX_PAIRS = 80
 MAX_EXTRAS = 10
 MAX_PLACEMENTS = 1000
+MAX_LAMPS = 60
 #: Metres. A plot bigger than this is not a house.
 EXTENT = 60.0
 
@@ -98,6 +105,16 @@ def default_layout(lang: str) -> dict[str, Any]:
                 "doors": [["living1", "yard"], ["living2", "kitchen"], ["kitchen", "bath1"]],
                 "stairs": [{"x": 4.6, "z": 6.0, "w": 3.4, "d": 1.0, "up": "+x"}],
                 "fences": [{"x0": 0, "x1": 8.0, "z": -6.5, "gates": [[0.3, 3.7]]}],
+                # One on the fence by the gate, one per living room, two in the
+                # kitchen and one in its bathroom.
+                "lamps": [
+                    {"id": "fence", "x": 3.7, "z": -6.5},
+                    {"id": "living1", "x": 4.0, "z": 1.75},
+                    {"id": "living2", "x": 4.0, "z": 5.0},
+                    {"id": "kitchen-a", "x": 2.0, "z": 8.75},
+                    {"id": "kitchen-b", "x": 4.4, "z": 8.75},
+                    {"id": "bath1", "x": 6.95, "z": 9.45},
+                ],
             },
             {
                 "id": "f2",
@@ -117,6 +134,14 @@ def default_layout(lang: str) -> dict[str, Any]:
                 "doors": [["bath2", "bed1"], ["bath2", "bed2"], ["hall", "bed1"], ["hall", "bed2"]],
                 "stairs": [],
                 "fences": [],
+                # Two in each bedroom, one in the bathroom between them.
+                "lamps": [
+                    {"id": "bed1-a", "x": 2.7, "z": 2.4},
+                    {"id": "bed1-b", "x": 5.3, "z": 2.4},
+                    {"id": "bath2", "x": 1.5, "z": 5.9},
+                    {"id": "bed2-a", "x": 2.7, "z": 8.75},
+                    {"id": "bed2-b", "x": 5.3, "z": 8.75},
+                ],
             },
         ]
     }
@@ -227,6 +252,19 @@ def _fence(raw: Any) -> dict[str, Any]:
     return {"x0": x0, "x1": x1, "z": _number(raw.get("z"), "fence z"), "gates": gates}
 
 
+def _lamps(value: Any) -> list[dict[str, Any]]:
+    lamps, ids = [], set()
+    for raw in _list(value, "lamps", MAX_LAMPS):
+        if not isinstance(raw, dict):
+            raise ValueError("a lamp must be an object")
+        lamp_id = _ident(raw.get("id"), "a lamp")
+        if lamp_id in ids:
+            raise ValueError("lamp id %s is used twice" % lamp_id)
+        ids.add(lamp_id)
+        lamps.append({"id": lamp_id, "x": _number(raw.get("x"), "lamp x"), "z": _number(raw.get("z"), "lamp z")})
+    return lamps
+
+
 def validate_layout(raw: Any) -> dict[str, Any]:
     """A clean copy of a plan, or ValueError saying what is wrong with it."""
     if not isinstance(raw, dict):
@@ -255,8 +293,26 @@ def validate_layout(raw: Any) -> dict[str, Any]:
             "doors": _pairs(raw_floor.get("doors"), "doors", set(room_ids)),
             "stairs": [_stairs(s) for s in _list(raw_floor.get("stairs"), "stairs", MAX_EXTRAS)],
             "fences": [_fence(f) for f in _list(raw_floor.get("fences"), "fences", MAX_EXTRAS)],
+            "lamps": _lamps(raw_floor.get("lamps")),
         })
     return {"floors": floors}
+
+
+def lamp_key(value: Any) -> str:
+    """"<floor id>:<lamp id>", the name a lamp's binding is kept under."""
+    floor, sep, lamp = str(value).partition(":")
+    if not sep:
+        raise ValueError("a lamp is named <floor>:<lamp>")
+    return _ident(floor, "a lamp's floor") + ":" + _ident(lamp, "a lamp")
+
+
+def validate_binding(value: Any) -> str | None:
+    """A device id, or None for "no device: never light up"."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not 0 < len(value) <= 200:
+        raise ValueError("'device' must be a device id or null")
+    return value
 
 
 def validate_placement(raw: Any) -> dict[str, Any]:
@@ -278,6 +334,9 @@ class HouseStore:
         #: None until the operator saves a plan: DEFAULT is shown meanwhile.
         self._layout: dict[str, Any] | None = None
         self._placements: dict[str, dict[str, Any]] = {}
+        #: "<floor>:<lamp>" -> device id, or None for a lamp tied to nothing.
+        #: A lamp missing here follows whichever device the browser guesses.
+        self._lamps: dict[str, str | None] = {}
         self.last_error: str | None = None
 
     @property
@@ -310,6 +369,14 @@ class HouseStore:
                 log.warning("skipping the stored place of %s: %s", device_id, exc)
             if len(self._placements) >= MAX_PLACEMENTS:
                 break
+        lamps = raw.get("lamps")
+        for key, device in (lamps.items() if isinstance(lamps, dict) else []):
+            try:
+                self._lamps[lamp_key(key)] = validate_binding(device)
+            except ValueError as exc:
+                log.warning("skipping the stored binding of lamp %s: %s", key, exc)
+            if len(self._lamps) >= MAX_PLACEMENTS:
+                break
         log.info("loaded the house plan (%s) and %d device places from %s",
                  "custom" if self._layout else "default", len(self._placements), self.path)
 
@@ -318,16 +385,32 @@ class HouseStore:
             "layout": self._layout or default_layout(lang),
             "custom": self._layout is not None,
             "placements": {k: dict(v) for k, v in self._placements.items()},
+            "lamps": dict(self._lamps),
             "editable": self.enabled,
             "words": {"kinds": ROOM_WORDS, "upper": UPPER_WORDS, "lower": LOWER_WORDS},
         }
 
     def set_layout(self, raw: Any) -> None:
         layout = validate_layout(raw)
-        self._commit(layout, self._placements)
+        self._commit(layout, self._placements, self._lamps)
 
     def reset_layout(self) -> None:
-        self._commit(None, self._placements)
+        self._commit(None, self._placements, self._lamps)
+
+    def bind_lamp(self, key: Any, device: Any) -> None:
+        key, device = lamp_key(key), validate_binding(device)
+        if key not in self._lamps and len(self._lamps) >= MAX_PLACEMENTS:
+            raise ValueError("at most %d lamp bindings" % MAX_PLACEMENTS)
+        self._commit(self._layout, self._placements, {**self._lamps, key: device})
+
+    def unbind_lamp(self, key: Any) -> None:
+        """Back to the browser's guess."""
+        key = lamp_key(key)
+        if key not in self._lamps:
+            return
+        lamps = dict(self._lamps)
+        del lamps[key]
+        self._commit(self._layout, self._placements, lamps)
 
     def place(self, device_id: str, raw: Any) -> dict[str, Any]:
         if not device_id or len(device_id) > 200:
@@ -335,7 +418,7 @@ class HouseStore:
         placement = validate_placement(raw)
         if device_id not in self._placements and len(self._placements) >= MAX_PLACEMENTS:
             raise ValueError("at most %d placed devices" % MAX_PLACEMENTS)
-        self._commit(self._layout, {**self._placements, device_id: placement})
+        self._commit(self._layout, {**self._placements, device_id: placement}, self._lamps)
         return placement
 
     def unplace(self, device_id: str) -> None:
@@ -343,19 +426,22 @@ class HouseStore:
             return
         placements = dict(self._placements)
         del placements[device_id]
-        self._commit(self._layout, placements)
+        self._commit(self._layout, placements, self._lamps)
 
-    def _commit(self, layout: dict[str, Any] | None, placements: dict[str, dict[str, Any]]) -> None:
+    def _commit(self, layout: dict[str, Any] | None, placements: dict[str, dict[str, Any]],
+                lamps: dict[str, str | None]) -> None:
         # Disk first: a change that never reached the file must not linger in
         # memory, where it would show everywhere until a restart undid it.
-        self._save(layout, placements)
-        self._layout, self._placements = layout, placements
+        self._save(layout, placements, lamps)
+        self._layout, self._placements, self._lamps = layout, placements, lamps
 
-    def _save(self, layout: dict[str, Any] | None, placements: dict[str, dict[str, Any]]) -> None:
+    def _save(self, layout: dict[str, Any] | None, placements: dict[str, dict[str, Any]],
+              lamps: dict[str, str | None]) -> None:
         if self.path is None:
             raise OSError("house storage is disabled")
         payload = json.dumps(
-            {"version": 1, "layout": layout, "placements": placements}, ensure_ascii=False, indent=2
+            {"version": 1, "layout": layout, "placements": placements, "lamps": lamps},
+            ensure_ascii=False, indent=2,
         )
         temp = self.path.with_name(self.path.name + ".tmp")
         try:

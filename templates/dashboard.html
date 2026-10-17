@@ -511,7 +511,7 @@
            the first time this page opens: the Pi sends the plan as a few KB
            of JSON and the states it was sending anyway. -->
       <template x-if="page === 'house'">
-        <div class="flex flex-col gap-4" @keydown.escape.window="house.placing ? (house.placing = null) : (house.selected = null)">
+        <div class="flex flex-col gap-4" @keydown.escape.window="house.placing ? (house.placing = null) : (house.selected = null, house.lamp = null)">
           <div class="flex flex-wrap items-end gap-3">
             <div class="mr-auto min-w-0">
               <h1 class="text-[26px] font-semibold leading-tight tracking-tight md:text-[30px]">{{ _('บ้าน 3D') }}</h1>
@@ -556,7 +556,7 @@
                   <p class="pane dense px-3.5 py-2 text-[13px] text-[var(--muted)]">{{ _('ลากป้ายเพื่อย้ายอุปกรณ์') }}</p>
                 </template>
                 <template x-if="house.mode === 'plan'">
-                  <p class="pane dense px-3.5 py-2 text-[13px] text-[var(--muted)]">{{ _('แตะห้องในภาพเพื่อแก้ขนาด') }}</p>
+                  <p class="pane dense px-3.5 py-2 text-[13px] text-[var(--muted)]">{{ _('แตะห้องเพื่อแก้ขนาด ลากหลอดไฟเพื่อย้าย') }}</p>
                 </template>
               </div>
 
@@ -673,6 +673,50 @@
                   </a>
                 </div>
               </template>
+
+              <!-- A lamp: the device that switches it, and the choice of it. -->
+              <template x-for="lp in (houseLampCard && !houseDevice && !house.placing ? [houseLampCard] : [])" :key="lp.key">
+                <div class="house-card pane dense" role="group" :aria-label="tr('หลอดไฟ') + ' ' + lampTitle(lp)">
+                  <div class="flex items-center gap-3">
+                    <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border"
+                          :class="lp.dev && lp.dev.online && isOn(lp.dev) ? 'border-[var(--accent-line)] bg-[var(--accent-soft)]' : 'border-[var(--line)] bg-[var(--tile)]'">
+                      <span class="dev-icon" :class="lp.dev && lp.dev.online && isOn(lp.dev) && 'is-active'" x-html="icon('dev-light')"></span>
+                    </span>
+                    <div class="min-w-0 flex-1">
+                      <p class="truncate text-[16px] font-medium" x-text="tr('หลอดไฟ') + ' · ' + lampTitle(lp)"></p>
+                      <p class="truncate text-[13px] text-[var(--faint)]"
+                         x-text="lp.dev ? tr('ทำงานตาม {name}', { name: lp.dev.name }) + ' · ' + summary(lp.dev) : tr('ยังไม่ได้ผูกกับอุปกรณ์')"></p>
+                    </div>
+                    <template x-if="lp.dev && isSwitchable(lp.dev)">
+                      <button class="toggle" :class="isPending(lp.dev.id, 'switch') && 'is-pending'"
+                              :aria-pressed="isOn(lp.dev) ? 'true' : 'false'"
+                              :aria-label="(isOn(lp.dev) ? tr('ปิด ') : tr('เปิด ')) + lp.dev.name"
+                              :disabled="!lp.dev.online" @click="toggle(lp.dev)"></button>
+                    </template>
+                    <button class="-mr-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[var(--faint)] hover:bg-[var(--tile-hover)] hover:text-[var(--text)]"
+                            @click="house.lamp = null" aria-label="{{ _('ปิดหน้าต่างนี้') }}">
+                      <span class="ic h-4 w-4" x-html="icon('close')"></span>
+                    </button>
+                  </div>
+                  <template x-if="house.editable">
+                    <label class="mt-3 block">
+                      <span class="mb-1.5 block text-[13px] text-[var(--faint)]">{{ _('อุปกรณ์ที่เปิดปิดหลอดนี้') }}</span>
+                      <select class="field !h-10 !text-[15px]" @change="setLampDevice(lp, $event.target.value)">
+                        <option value="__auto" :selected="lampChoice(lp) === '__auto'">{{ _('ตามชื่อห้อง (อัตโนมัติ)') }}</option>
+                        <option value="__none" :selected="lampChoice(lp) === '__none'">{{ _('ไม่มี — หลอดนี้ไม่ได้ต่อกับระบบ') }}</option>
+                        <template x-for="d in lampDevices" :key="d.id">
+                          <option :value="d.id" :selected="lampChoice(lp) === d.id" x-text="roomLabel(d.room) + ' · ' + d.name"></option>
+                        </template>
+                      </select>
+                    </label>
+                  </template>
+                  <template x-if="lp.dev">
+                    <a :href="deviceHref(lp.dev)" class="mt-3 inline-flex items-center gap-1 text-[13px] text-[var(--accent-text)] hover:underline">
+                      {{ _('ดูรายละเอียด') }}<span class="ic h-3.5 w-3.5" x-html="icon('chevron')"></span>
+                    </a>
+                  </template>
+                </div>
+              </template>
             </div>
 
             <!-- Arranging: every device, the ones without a place first. -->
@@ -741,6 +785,30 @@
                       </template>
                       <button class="btn btn-ghost !h-9 w-full text-[14px]" @click="addRoom(floor)">
                         <span class="ic h-4 w-4" x-html="icon('plus')"></span>{{ _('เพิ่มห้อง') }}
+                      </button>
+
+                      <p class="mb-1.5 mt-4 text-[13px] text-[var(--faint)]">{{ _('หลอดไฟ') }}</p>
+                      <template x-for="lamp in (floor.lamps || [])" :key="lamp.id">
+                        <div :id="'plan-lamp-' + floor.id + '-' + lamp.id" class="tile mb-1.5 flex items-end gap-1.5 p-2"
+                             :class="house.focus === 'lamp:' + floor.id + ':' + lamp.id && '!border-[var(--accent)]'"
+                             @focusin="houseFocusLamp(floor.id, lamp.id)">
+                          <span class="dev-icon mb-2 !h-5 !w-5" x-html="icon('dev-light')"></span>
+                          <p class="min-w-0 flex-1 truncate pb-2 text-[14px]" x-text="planLampRoom(floor, lamp)"></p>
+                          <template x-for="k in ['x', 'z']" :key="k">
+                            <label class="block w-[76px] shrink-0">
+                              <span class="block text-[11.5px] text-[var(--faint)]" x-text="k"></span>
+                              <input type="number" step="0.1" inputmode="decimal" class="field !h-9 !px-2 !text-[14px] tabular-nums"
+                                     x-model.number="lamp[k]">
+                            </label>
+                          </template>
+                          <button class="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-[var(--faint)] hover:bg-[var(--tile-hover)] hover:text-[var(--danger-text)]"
+                                  @click="removeLamp(floor, lamp)" :aria-label="tr('ลบหลอดไฟ') + ' ' + planLampRoom(floor, lamp)">
+                            <span class="ic h-4 w-4" x-html="icon('close')"></span>
+                          </button>
+                        </div>
+                      </template>
+                      <button class="btn btn-ghost !h-9 w-full text-[14px]" @click="addLamp(floor)">
+                        <span class="ic h-4 w-4" x-html="icon('plus')"></span>{{ _('เพิ่มหลอดไฟ') }}
                       </button>
 
                       <p class="mb-1.5 mt-4 text-[13px] text-[var(--faint)]">{{ _('ประตูและห้องที่เปิดโล่งถึงกัน') }}</p>

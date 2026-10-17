@@ -270,11 +270,13 @@ docker restart iot-app
 | `PATCH` | `/api/automations/{id}` | ทั้งกฎหรือบางส่วน · `{"enabled": false}` = หยุดไว้ |
 | `DELETE` | `/api/automations/{id}` | ลบกฎ (รอบที่กำลังรออยู่ถูกยกเลิก) |
 | `POST` | `/api/automations/{id}/run` | ทำ actions ทันที ไม่ดู trigger/เงื่อนไข — ปุ่ม "ลองสั่งเลย" |
-| `GET` | `/api/house` | `{layout, custom, placements, editable, words}` — ผังเป็นเมตร ดูรูปแบบใน `app/house.py` |
+| `GET` | `/api/house` | `{layout, custom, placements, lamps, editable, words}` — ผังเป็นเมตร ดูรูปแบบใน `app/house.py` |
 | `PUT` | `/api/house/layout` | `{"layout": {"floors": […]}}` · ตรวจทั้งผังก่อนเก็บ |
 | `DELETE` | `/api/house/layout` | กลับไปใช้ผังตั้งต้น (ตำแหน่งอุปกรณ์ยังอยู่) |
 | `PUT` | `/api/house/placements/{id}` | `{"floor": "f1", "x": 2.1, "z": 3}` · วางอุปกรณ์เอง |
 | `DELETE` | `/api/house/placements/{id}` | กลับไปวางตามชื่อห้องอัตโนมัติ |
+| `PUT` | `/api/house/lamps/{floor}:{lamp}` | `{"device": "…"}` = หลอดนี้ติดตามอุปกรณ์ตัวนี้ · `{"device": null}` = ไม่ต่อกับอะไร |
+| `DELETE` | `/api/house/lamps/{floor}:{lamp}` | กลับไปเดาจากชื่อห้อง |
 | `GET` | `/api/devices/{id}/history` | `?capability=temperature&hours=24&points=240` |
 | `POST` | `/api/devices/commission` | ปิดเป็นค่าเริ่มต้น (`ALLOW_HTTP_COMMISSION`) · ใช้ `make commission` แทน |
 | `WS` | `/ws` | push: `snapshot` · `devices` · `groups` · `automations` · `automation_run` · `house` · `state` · `command` · `adapter` · `ping` |
@@ -331,6 +333,8 @@ Pi ส่งแค่ผังบ้านเป็น JSON ไม่กี่ K
 ผนังคิดเองจากขอบห้องที่ชนกัน ผังจึงเก็บแค่สี่เหลี่ยมของห้อง ประตู และคู่ห้องที่เปิดโล่งถึงกัน
 อุปกรณ์ที่ไม่ได้วางเองจะไปอยู่ในห้องที่ชื่อตรงกับชื่อห้องของอุปกรณ์ ("ห้องนอนชั้นบน" → ห้องนอนชั้น 2)
 แอร์/ปลั๊ก/สวิตช์/เซนเซอร์ติดผนังที่ใกล้สุดเอง ไฟที่วางชิดรั้วจะไปอยู่บนรั้ว
+หลอดไฟในผังเป็นของจริงในบ้าน วาดไว้เสมอแม้ไม่มีอุปกรณ์คุม และติดเมื่ออุปกรณ์ที่ผูกไว้เปิดอยู่ —
+ถ้าไม่ได้ผูกเอง หลอดจะตามอุปกรณ์ประเภทไฟที่ชื่อห้องตรงกัน (ห้องที่มีไฟตัวเดียว ทุกหลอดในห้องตามตัวนั้น)
 
 **Migration มี checksum + advisory lock** แก้ไฟล์ที่ apply ไปแล้วจะ error ทันที
 และสอง instance ที่ start พร้อมกันจะไม่ชนกัน — ไฟล์ที่ขึ้นต้นด้วย `-- migrate:no-transaction`

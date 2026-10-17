@@ -133,14 +133,16 @@ function dashboard() {
     automations: { enabled: true, rules: [], log: [], stats: {} },
     // The rule open in the editor: a copy, so a broadcast never clobbers typing.
     ruleEdit: { open: false, id: null, draft: null, busy: false, error: '' },
-    /* The 3D house page. `layout` and `placements` are the Pi's (fetched when
-     * the page first opens); `draft` is the plan being edited, drawn live in
+    /* The 3D house page. `layout`, `placements` and `lamps` (which device
+     * each lamp follows, where the operator chose) are the Pi's, fetched when
+     * the page first opens; `draft` is the plan being edited, drawn live in
      * place of `layout`. `floor` is 'all' or a floor id; `mode` is 'view',
-     * 'arrange' (move devices) or 'plan' (edit rooms). */
+     * 'arrange' (move devices) or 'plan' (edit rooms). `lamp` is the lamp
+     * whose card is open ("<floor>:<lamp>"). */
     house: {
       loaded: false, loading: false, error: '', viewError: '', viewReady: 0,
-      layout: null, custom: false, placements: {}, editable: false,
-      floor: 'all', mode: 'view', selected: null, placing: null, focus: null,
+      layout: null, custom: false, placements: {}, lamps: {}, editable: false,
+      floor: 'all', mode: 'view', selected: null, lamp: null, placing: null, focus: null,
       draft: null, busy: false, planError: '',
       // Room-name words for automatic placement, from app/house.py.
       words: { kinds: [], upper: [], lower: [] },
@@ -1274,6 +1276,7 @@ function dashboard() {
         h.layout = body.layout;
         h.custom = body.custom;
         h.placements = body.placements || {};
+        h.lamps = body.lamps || {};
         h.editable = body.editable;
         if (body.words) h.words = body.words;
         h.loaded = true;
@@ -1304,6 +1307,13 @@ function dashboard() {
             this.housePut(id, { floor, x, z });
           },
           onRoom: (floor, room) => this.houseFocus(floor, room, true),
+          onLamp: (key) => this.houseLampTap(key),
+          onLampMove: (floor, id, x, z) => {
+            const lamp = this.house.draft && this.planLampOf(floor, id);
+            if (!lamp) return;
+            lamp.x = x; lamp.z = z;
+            this.houseFocusLamp(floor, id, true);
+          },
         }))
         .then(view => {
           if (token !== houseToken || !el.isConnected) { view.destroy(); return; }
@@ -1331,6 +1341,7 @@ function dashboard() {
         layout: layout ? JSON.parse(JSON.stringify(layout)) : null,
         floor: h.floor, mode: h.mode, theme: this.theme,
         selected: h.selected, placing: h.placing, focus: h.focus,
+        lamps: this.houseLampPins,
         pins: this.housePins,
       };
       if (h.viewReady && houseView) houseView.update(state);
@@ -1367,6 +1378,7 @@ function dashboard() {
           && !window.confirm(tr('ทิ้งผังห้องที่แก้ไว้แต่ยังไม่ได้บันทึก?'))) return;
       h.placing = null;
       h.focus = null;
+      h.lamp = null;
       h.planError = '';
       h.draft = mode === 'plan' && h.layout ? JSON.parse(JSON.stringify(h.layout)) : null;
       if (mode === 'plan') h.selected = null;
@@ -1376,6 +1388,20 @@ function dashboard() {
     houseSelect(id) {
       if (this.house.mode === 'plan') return;
       this.house.selected = id;
+      this.house.lamp = null;
+    },
+
+    /** A lamp tapped: while planning, its row in the editor; otherwise its
+     *  card, to choose what switches it. */
+    houseLampTap(key) {
+      const h = this.house;
+      if (h.mode === 'plan') {
+        const [floor, id] = key.split(':');
+        this.houseFocusLamp(floor, id, true);
+        return;
+      }
+      h.selected = null;
+      h.lamp = key;
     },
 
     get houseDevice() {
@@ -1471,16 +1497,142 @@ function dashboard() {
       });
     },
 
+    /** The plan room at a point of a floor; a point on its very edge (a
+     *  lamp on the fence) belongs to the nearest room within half a metre. */
+    houseRoomAt(floor, x, z) {
+      const rooms = floor.rooms.map(r => this.houseNum(r)).sort((a, b) => a.w * a.d - b.w * b.d);
+      const inside = rooms.find(r => x > r.x && x < r.x + r.w && z > r.z && z < r.z + r.d);
+      if (inside) return inside;
+      let best = null, gap = 0.5;
+      for (const r of rooms) {
+        const d = Math.hypot(x - Math.max(r.x, Math.min(x, r.x + r.w)), z - Math.max(r.z, Math.min(z, r.z + r.d)));
+        if (d <= gap) { best = r; gap = d; }
+      }
+      return best;
+    },
+
+    /* Every lamp on the plan with the device that switches it. The operator's
+     * choice wins (a device, or null for none). A lamp nobody chose for
+     * follows the lights whose room name matches its room: with one light
+     * there, every lamp in the room follows it -- one switch for the room's
+     * lights is the usual wiring -- and with several, one lamp each in turn.
+     * A light the operator placed by hand is standing somewhere else, so it
+     * is no lamp's guess. `auto` says whether this was guessed. */
+    get houseLampLinks() {
+      const layout = this.houseLayout;
+      if (!layout) return [];
+      const h = this.house, links = [];
+      for (const floor of layout.floors) {
+        (floor.lamps || []).forEach((lamp, i) => {
+          const x = Number.isFinite(+lamp.x) && lamp.x !== '' ? +lamp.x : 0;
+          const z = Number.isFinite(+lamp.z) && lamp.z !== '' ? +lamp.z : 0;
+          const key = floor.id + ':' + lamp.id, chosen = key in h.lamps;
+          links.push({
+            key, floor, lamp, x, z, n: i + 1, room: this.houseRoomAt(floor, x, z),
+            device: chosen ? h.lamps[key] : null, auto: !chosen,
+          });
+        });
+      }
+      const taken = new Set(links.filter(l => !l.auto && l.device).map(l => l.device));
+      const lights = new Map();
+      for (const d of this.devices.slice().sort((a, b) => a.name.localeCompare(b.name, 'th'))) {
+        if (d.kind !== 'light' || h.placements[d.id] || taken.has(d.id)) continue;
+        const at = this.houseRoomFor(layout, d.room);
+        if (!at) continue;
+        const room = at.floor.id + ':' + at.room.id;
+        if (!lights.has(room)) lights.set(room, []);
+        lights.get(room).push(d.id);
+      }
+      const turn = new Map();
+      for (const link of links) {
+        if (!link.auto || !link.room) continue;
+        const room = link.floor.id + ':' + link.room.id, list = lights.get(room) || [];
+        const i = turn.get(room) || 0;
+        turn.set(room, i + 1);
+        link.device = list.length === 1 ? list[0] : (list[i] || null);
+      }
+      return links;
+    },
+
+    /** The first lamp each device switches, by device id. */
+    get houseLampOf() {
+      const out = {};
+      for (const link of this.houseLampLinks) if (link.device && !(link.device in out)) out[link.device] = link;
+      return out;
+    },
+
+    /** The lamps as the drawing wants them: where, and lit or not. */
+    get houseLampPins() {
+      return this.houseLampLinks.map(link => {
+        const d = link.device ? this.deviceById(link.device) : null;
+        const pin = { key: link.key, floor: link.floor.id, id: link.lamp.id, x: link.x, z: link.z, device: d ? d.id : null,
+                      active: !!d && d.online && this.isOn(d), level: 1, rgb: this.WARM_RGB };
+        if (d) {
+          const level = this.shown(d.id, 'brightness'), k = this.shown(d.id, 'color_temp');
+          if (typeof level === 'number') pin.level = level / 100;
+          if (typeof k === 'number') pin.rgb = this.kelvinRgb(k);
+        }
+        return pin;
+      });
+    },
+
+    /** The lamp whose card is open, with its device. */
+    get houseLampCard() {
+      const link = this.house.lamp && this.houseLampLinks.find(l => l.key === this.house.lamp);
+      if (!link) return null;
+      return { ...link, dev: link.device ? this.deviceById(link.device) : null };
+    },
+
+    /** What a lamp's switch picker holds: '__auto', '__none' or a device id. */
+    lampChoice(link) {
+      if (link.auto) return '__auto';
+      return link.device || '__none';
+    },
+
+    /** Devices that can switch a lamp, by room. */
+    get lampDevices() {
+      return this.devices.filter(d => this.isSwitchable(d))
+        .slice().sort((a, b) => a.room.localeCompare(b.room, 'th') || a.name.localeCompare(b.name, 'th'));
+    },
+
+    /** "ห้องครัว ดวงที่ 2", or just the room where it has one lamp. */
+    lampTitle(link) {
+      const room = link.room ? link.room.name : link.floor.name;
+      const same = this.houseLampLinks.filter(l => l.floor.id === link.floor.id && l.room && link.room && l.room.id === link.room.id);
+      return same.length > 1 ? tr('{room} ดวงที่ {n}', { room, n: same.findIndex(l => l.key === link.key) + 1 }) : room;
+    },
+
+    async setLampDevice(link, choice) {
+      const h = this.house, before = { ...h.lamps };
+      const next = { ...h.lamps };
+      if (choice === '__auto') delete next[link.key];
+      else next[link.key] = choice === '__none' ? null : choice;
+      h.lamps = next;
+      try {
+        const url = `/api/house/lamps/${encodeURIComponent(link.key)}`;
+        if (choice === '__auto') await apiFetch(url, { method: 'DELETE' });
+        else await apiFetch(url, { method: 'PUT', json: { device: next[link.key] } });
+      } catch (err) {
+        h.lamps = before;
+        this.toast('error', tr('ผูกหลอดไฟไม่สำเร็จ'), err.message);
+      }
+    },
+
     /** Where every device stands, by id: the place the operator gave it,
-     *  else a spot in the room its room name matches. `auto` says which. */
+     *  else -- for a light -- the lamp it switches, else a spot in the room
+     *  its room name matches. `auto` says whether it was guessed, `lamp`
+     *  which lamp it sits on. */
     get housePlaces() {
       const layout = this.houseLayout;
       if (!layout) return {};
       const floors = new Map(layout.floors.map(f => [f.id, f]));
+      const lampOf = this.houseLampOf;
       const out = {}, waiting = new Map();
       for (const d of this.devices) {
         const p = this.house.placements[d.id];
         if (p && floors.has(p.floor)) { out[d.id] = { floor: p.floor, x: p.x, z: p.z, auto: false }; continue; }
+        const lamp = d.kind === 'light' && lampOf[d.id];
+        if (lamp) { out[d.id] = { floor: lamp.floor.id, x: lamp.x, z: lamp.z, auto: true, lamp: lamp.key }; continue; }
         const at = this.houseRoomFor(layout, d.room);
         if (!at) continue;
         const key = at.floor.id + ':' + at.room.id;
@@ -1503,6 +1655,7 @@ function dashboard() {
         const active = d.online && this.iconActive(d);
         const pin = {
           id: d.id, name: d.name, kind, icon: ICONS['dev-' + kind], floor: at.floor, x: at.x, z: at.z,
+          fixture: !!at.lamp,
           online: d.online, active, text: this.summary(d), textColor: '', level: 1, rgb: null,
           alert: d.online && this.hasIssue(d),
           pending: Object.keys(this.pending).some(k => k.startsWith(d.id + '|')),
@@ -1544,6 +1697,7 @@ function dashboard() {
       const at = this.housePlaces[device.id];
       if (!at) return tr('ยังไม่ได้วาง');
       const floor = (this.houseLayout.floors.find(f => f.id === at.floor) || {}).name || '';
+      if (at.lamp) return tr('ที่หลอดไฟ · {floor}', { floor });
       return at.auto ? tr('ตามห้อง · {floor}', { floor }) : floor;
     },
 
@@ -1596,9 +1750,17 @@ function dashboard() {
      *  into view -- scrolling the list only, so the drawing stays put. */
     houseFocus(floorId, roomId, scroll) {
       this.house.focus = floorId + ':' + roomId;
-      if (!scroll) return;
+      if (scroll) this.planScrollTo('plan-' + floorId + '-' + roomId);
+    },
+
+    houseFocusLamp(floorId, lampId, scroll) {
+      this.house.focus = 'lamp:' + floorId + ':' + lampId;
+      if (scroll) this.planScrollTo('plan-lamp-' + floorId + '-' + lampId);
+    },
+
+    planScrollTo(rowId) {
       this.$nextTick(() => {
-        const row = document.getElementById('plan-' + floorId + '-' + roomId);
+        const row = document.getElementById(rowId);
         const list = row && row.closest('.overflow-y-auto');
         if (!list) return;
         const top = row.offsetTop - list.offsetTop;
@@ -1606,6 +1768,37 @@ function dashboard() {
           list.scrollTo({ top: top - 8, behavior: 'smooth' });
         }
       });
+    },
+
+    planLampOf(floorId, lampId) {
+      const floor = this.house.draft && this.house.draft.floors.find(f => f.id === floorId);
+      return floor && (floor.lamps || []).find(l => l.id === lampId);
+    },
+
+    /** "ห้องครัว ดวงที่ 2", for a lamp's row: the room it hangs in, and
+     *  which of that room's lamps it is. */
+    planLampRoom(floor, lamp) {
+      const roomOf = (l) => this.houseRoomAt(floor, +l.x || 0, +l.z || 0);
+      const room = roomOf(lamp);
+      if (!room) return '—';
+      const same = (floor.lamps || []).filter(l => (roomOf(l) || {}).id === room.id);
+      return same.length > 1 ? tr('{room} ดวงที่ {n}', { room: room.name, n: same.indexOf(lamp) + 1 }) : room.name;
+    },
+
+    /** A new lamp in the middle of the room being edited, else of the
+     *  floor's first room indoors. */
+    addLamp(floor) {
+      const [fid, rid] = (this.house.focus || '').split(':');
+      const room = (fid === floor.id && floor.rooms.find(r => r.id === rid))
+        || floor.rooms.find(r => !['yard', 'carport'].includes(r.kind)) || floor.rooms[0];
+      const r = room ? this.houseNum(room) : { x: 0, z: 0, w: 2, d: 2 };
+      const id = 'l' + Date.now().toString(36).slice(-4) + Math.random().toString(36).slice(2, 5);
+      floor.lamps = (floor.lamps || []).concat([{ id, x: Math.round((r.x + r.w / 2) * 100) / 100, z: Math.round((r.z + r.d / 2) * 100) / 100 }]);
+      this.houseFocusLamp(floor.id, id, true);
+    },
+
+    removeLamp(floor, lamp) {
+      floor.lamps = (floor.lamps || []).filter(l => l.id !== lamp.id);
     },
 
     /** What is wrong with the plan being edited, said in the viewer's
@@ -1620,6 +1813,12 @@ function dashboard() {
             return fail(tr('กรอกตัวเลขของ "{name}" ให้ครบ', { name }));
           }
           if (+room.w < 0.5 || +room.d < 0.5) return fail(tr('"{name}" ต้องกว้างและลึกอย่างน้อย 0.5 เมตร', { name }));
+        }
+        for (const lamp of floor.lamps || []) {
+          if (['x', 'z'].some(k => lamp[k] === '' || !Number.isFinite(+lamp[k]))) {
+            this.houseFocusLamp(floor.id, lamp.id, true);
+            return tr('กรอกตำแหน่งหลอดไฟให้ครบ');
+          }
         }
       }
       return '';

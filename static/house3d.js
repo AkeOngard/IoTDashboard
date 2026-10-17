@@ -18,6 +18,11 @@
  * running (someone moving in a room) keeps frames coming. On a phone that is
  * the difference between a page that sits idle and one that warms the hand.
  *
+ * Lamps are the plan's light fittings, drawn whether or not anything drives
+ * them; each glows while the device dashboard.js says switches it is on. A
+ * light device sitting on a lamp (`fixture`) shows only its label there, so
+ * the house never gets two bulbs in one place.
+ *
  * This file holds no wording: every label's text arrives from dashboard.js,
  * already in the viewer's language.
  */
@@ -42,6 +47,9 @@ const HALF = 1.1;            // inner walls: enough to read the rooms, low enoug
 const FENCE_H = 1.5;
 const EPS = 0.01;
 const INDOOR = new Set(['living', 'bed', 'bath', 'kitchen', 'hall', 'room']);
+// Light effects are never what a tap meant: a lit lamp's pool of light would
+// otherwise catch every tap on the floor around it.
+const NO_HIT = () => {};
 
 // What sits on a wall, and how high (metres above its floor). An AC's height
 // is taken from the ceiling instead (see _layoutPin).
@@ -192,6 +200,7 @@ class HouseView {
     this.layout = null;
     this.floors = new Map();
     this.pins = new Map();
+    this.lamps = new Map();
     this.roomTags = [];
     this.yaw = -0.5; this.pitch = 0.92; this.dist = 26; this.minDist = 3; this.maxDist = 90;
     this._frame = 0;
@@ -200,6 +209,7 @@ class HouseView {
     this._ptrs = new Map();
     this._gesture = null;
     this._drag = null;
+    this._lampDrag = null;
 
     const renderer = this.renderer = new T.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'low-power' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -231,7 +241,10 @@ class HouseView {
       pole: new T.CylinderGeometry(0.045, 0.06, 1, 10),
       wheel: new T.CylinderGeometry(0.34, 0.34, 0.24, 18),
       ring: new T.RingGeometry(0.86, 1, 48),
+      // A lamp's tap target: a bulb is too small to hit with a thumb.
+      reach: new T.SphereGeometry(0.4, 8, 6),
     };
+    this._reachMat = new T.MeshBasicMaterial({ visible: false });
     this.geo.ring.rotateX(-Math.PI / 2);
     this.tex = { glow: gradientTexture('glow'), pool: gradientTexture('pool'), fade: gradientTexture('fade') };
     this.raycaster = new T.Raycaster();
@@ -270,9 +283,13 @@ class HouseView {
         ? { floors: next.layout.floors.map(f => ({ ...f, rooms: f.rooms.map(cleanRoom) })) }
         : null;
       this._build();
-      if (themeChanged) this.pins.forEach(pin => this._paint(pin));
+      if (themeChanged) {
+        this.pins.forEach(pin => this._paint(pin));
+        this.lamps.forEach(lamp => this._paintLamp(lamp));
+      }
     }
     this._paintFocus();
+    this._setLamps(next.lamps || []);
     this._setPins(next.pins || []);
     if (s.selected !== next.selected) {
       s.selected = next.selected || null;
@@ -336,6 +353,9 @@ class HouseView {
     this._unbind();
     this.pins.forEach(pin => this._dropPin(pin));
     this.pins.clear();
+    this.lamps.forEach(lamp => this._dropLamp(lamp));
+    this.lamps.clear();
+    this._reachMat.dispose();
     this._clearWorld();
     Object.values(this.geo).forEach(g => g.dispose());
     Object.values(this.tex).forEach(t => t.dispose());
@@ -408,6 +428,7 @@ class HouseView {
       this.floors.set(floor.id, info);
       if (visible) this._buildFloor(info, pal, all && floors.length > 1);
     });
+    this.lamps.forEach(lamp => this._layoutLamp(lamp));
     this.pins.forEach(pin => this._layoutPin(pin));
   }
 
@@ -604,6 +625,10 @@ class HouseView {
       mesh.material.emissive.set(on ? pal.focus : 0x000000);
       mesh.material.emissiveIntensity = on ? 0.45 : 0;
     }
+    this.lamps.forEach(lamp => {
+      const on = this.state.focus === 'lamp:' + lamp.data.key;
+      if (on !== !!lamp.focused) { lamp.focused = on; this._paintLamp(lamp); }
+    });
     this.invalidate();
   }
 
@@ -619,6 +644,136 @@ class HouseView {
       }
     }
     return any ? box : null;
+  }
+
+  // ---------------------------------------------------------------- lights
+
+  /* A light's parts, the same for a lamp fitting and a light device standing
+   * on its own: a bulb on a short cord indoors or on a post out in the open,
+   * a glow round it, and the pool of light it casts on the floor. */
+  _lightParts(group, solid, effect, pal) {
+    const p = {};
+    p.bulb = solid(this.geo.bulb, pal.device);
+    p.cord = solid(this.geo.rod, pal.dim);
+    p.cord.scale.y = 0.3;
+    p.cord.position.y = 0.27;
+    p.pole = solid(this.geo.pole, pal.fence);
+    const glow = new T.Sprite(new T.SpriteMaterial({ map: this.tex.glow, transparent: true, depthWrite: false }));
+    glow.renderOrder = 3;
+    glow.raycast = NO_HIT;
+    group.add(glow);
+    p.glow = glow;
+    p.pool = effect(this.geo.plane, this.tex.pool);
+    p.pool.rotation.x = -Math.PI / 2;
+    return p;
+  }
+
+  /** Lit or not; `holder` keeps the pool's size for _lightSpot(). */
+  _lightPaint(p, holder, lit, rgb, level, pal) {
+    const blend = pal.additive ? T.AdditiveBlending : T.NormalBlending;
+    p.bulb.material.color.set(lit ? 0xffffff : pal.device);
+    if (lit) p.bulb.material.emissive.copy(rgb).multiplyScalar(0.45 + 0.55 * level);
+    p.glow.visible = lit;
+    p.glow.material.color.copy(rgb);
+    p.glow.material.blending = blend;
+    p.glow.material.opacity = 0.35 + 0.5 * level;
+    p.glow.scale.setScalar(0.8 + 0.9 * level);
+    p.pool.visible = lit;
+    p.pool.material.color.copy(rgb);
+    p.pool.material.blending = blend;
+    p.pool.material.opacity = (pal.additive ? 0.22 : 0.16) + (pal.additive ? 0.5 : 0.3) * level;
+    holder.poolRadius = 1.2 + 0.9 * level;
+  }
+
+  /** Where a light hangs: below the ceiling indoors, on the fence when it
+   *  is beside one, else on a post. Plan x, z and height above the floor. */
+  _lightSpot(info, p, holder, x, z) {
+    const room = innermost(info.rooms, x, z);
+    const fence = info.fences.find(f => Math.abs(num(f.z, 0) - z) < 0.8 && x >= num(f.x0, 0) - 0.3 && x <= num(f.x1, 0) + 0.3);
+    const outside = !isIndoor(room);
+    let y;
+    if (fence) { z = num(fence.z, 0); y = FENCE_H + 0.24; }
+    else y = outside ? 2.5 : info.height - 0.32;
+    p.cord.visible = !outside;
+    p.pole.visible = outside && !fence;
+    // The post stands from the ground to the lamp; the fence pillar is drawn already.
+    p.pole.scale.y = y - 0.12;
+    p.pole.position.y = -(y + 0.12) / 2;
+    const r = holder.poolRadius || 1.6;
+    p.pool.scale.set(r * 2, r * 2, 1);
+    p.pool.position.y = -y + (outside ? -0.01 : 0.03);
+    return { x, z, y };
+  }
+
+  // ----------------------------------------------------------------- lamps
+
+  _setLamps(list) {
+    const seen = new Set();
+    for (const d of list) {
+      seen.add(d.key);
+      let lamp = this.lamps.get(d.key);
+      if (!lamp) { lamp = this._makeLamp(d); this.lamps.set(d.key, lamp); }
+      const dragging = this._lampDrag && this._lampDrag.key === d.key;
+      if (!dragging) { lamp.x = num(d.x, 0); lamp.z = num(d.z, 0); }
+      lamp.floor = d.floor;
+      const changed = lamp.json !== (lamp.json = JSON.stringify(d));
+      lamp.data = d;
+      if (changed) this._paintLamp(lamp);
+      this._layoutLamp(lamp);
+    }
+    for (const [key, lamp] of this.lamps) {
+      if (!seen.has(key)) { this._dropLamp(lamp); this.lamps.delete(key); }
+    }
+  }
+
+  _makeLamp(d) {
+    const group = new T.Group();
+    group.userData.lamp = d.key;
+    const mats = [];
+    const solid = (geo, color) => {
+      const mat = new T.MeshLambertMaterial({ color });
+      mats.push(mat);
+      const mesh = new T.Mesh(geo, mat);
+      group.add(mesh);
+      return mesh;
+    };
+    const effect = (geo, map) => {
+      const mesh = new T.Mesh(geo, new T.MeshBasicMaterial({ map, transparent: true, depthWrite: false, side: T.DoubleSide }));
+      mesh.renderOrder = 2;
+      mesh.raycast = NO_HIT;
+      group.add(mesh);
+      return mesh;
+    };
+    const parts = this._lightParts(group, solid, effect, PALETTE[this.theme]);
+    group.add(new T.Mesh(this.geo.reach, this._reachMat));
+    this.scene.add(group);
+    return { data: d, group, parts, mats, x: 0, z: 0, floor: d.floor, json: '' };
+  }
+
+  _dropLamp(lamp) {
+    lamp.group.removeFromParent();
+    lamp.mats.forEach(m => m.dispose());
+    lamp.group.traverse(o => {
+      if (o.material && o.material !== this._reachMat && !lamp.mats.includes(o.material)) o.material.dispose();
+    });
+  }
+
+  _paintLamp(lamp) {
+    const d = lamp.data, pal = PALETTE[this.theme];
+    const rgb = this._c.setRGB(...(d.rgb || [255, 196, 128]).map(v => v / 255), T.SRGBColorSpace);
+    for (const mat of lamp.mats) mat.emissive.set(0x000000);
+    this._lightPaint(lamp.parts, lamp, !!d.active, rgb, clamp(num(d.level, 1), 0, 1), pal);
+    // Being edited in the plan: the bulb takes the accent.
+    if (lamp.focused) { lamp.parts.bulb.material.color.set(pal.focus); lamp.parts.bulb.material.emissive.set(pal.focus).multiplyScalar(0.6); }
+    this._layoutLamp(lamp);
+  }
+
+  _layoutLamp(lamp) {
+    const info = this.floors.get(lamp.floor);
+    lamp.group.visible = !!info && info.visible;
+    if (!lamp.group.visible) return;
+    const at = this._lightSpot(info, lamp.parts, lamp, lamp.x, lamp.z);
+    lamp.group.position.set(at.x + info.ox, info.base + at.y, -(at.z + info.oz));
   }
 
   // ------------------------------------------------------------------ pins
@@ -658,26 +813,16 @@ class HouseView {
       const mat = new T.MeshBasicMaterial({ map, transparent: true, depthWrite: false, side: T.DoubleSide });
       const mesh = new T.Mesh(geo, mat);
       mesh.renderOrder = 2;
+      mesh.raycast = NO_HIT;
       group.add(mesh);
       return mesh;
     };
     const pal = PALETTE[this.theme];
 
     switch (d.kind) {
-      case 'light': {
-        parts.bulb = solid(this.geo.bulb, pal.device);
-        parts.cord = solid(this.geo.rod, pal.dim);
-        parts.cord.scale.y = 0.3;
-        parts.cord.position.y = 0.27;
-        parts.pole = solid(this.geo.pole, pal.fence);
-        const glow = new T.Sprite(new T.SpriteMaterial({ map: this.tex.glow, transparent: true, depthWrite: false }));
-        glow.renderOrder = 3;
-        group.add(glow);
-        parts.glow = glow;
-        parts.pool = effect(this.geo.plane, this.tex.pool);
-        parts.pool.rotation.x = -Math.PI / 2;
+      case 'light':
+        Object.assign(parts, this._lightParts(group, solid, effect, pal));
         break;
-      }
       case 'ac': {
         parts.body = solid(this.geo.box, pal.device);
         parts.body.scale.set(0.9, 0.3, 0.22);
@@ -766,18 +911,7 @@ class HouseView {
     const lit = live && d.active;
     switch (d.kind) {
       case 'light':
-        p.bulb.material.color.set(lit ? 0xffffff : pal.device);
-        if (lit) p.bulb.material.emissive.copy(rgb).multiplyScalar(0.45 + 0.55 * level);
-        p.glow.visible = lit;
-        p.glow.material.color.copy(rgb);
-        p.glow.material.blending = blend;
-        p.glow.material.opacity = 0.35 + 0.5 * level;
-        p.glow.scale.setScalar(0.8 + 0.9 * level);
-        p.pool.visible = lit;
-        p.pool.material.color.copy(rgb);
-        p.pool.material.blending = blend;
-        p.pool.material.opacity = (pal.additive ? 0.22 : 0.16) + (pal.additive ? 0.5 : 0.3) * level;
-        pin.poolRadius = 1.2 + 0.9 * level;
+        this._lightPaint(p, pin, lit, rgb, level, pal);
         break;
       case 'ac':
         if (lit) p.strip.material.emissive.copy(rgb);
@@ -828,7 +962,8 @@ class HouseView {
   _layoutPin(pin) {
     const info = this.floors.get(pin.floor);
     const show = !!info && info.visible;
-    pin.group.visible = show;
+    // On a lamp, the lamp is the drawing: only the label is the device's.
+    pin.group.visible = show && !pin.data.fixture;
     pin.shown = show;
     if (!show) { pin.label.hidden = true; return; }
     pin.label.hidden = false;
@@ -847,18 +982,7 @@ class HouseView {
       sides.sort((a, b) => a[0] - b[0])[0][1]();
       y = ON_WALL[kind] < 0 ? H + ON_WALL[kind] : ON_WALL[kind];
     } else if (kind === 'light') {
-      const fence = info.fences.find(f => Math.abs(num(f.z, 0) - z) < 0.8 && x >= num(f.x0, 0) - 0.3 && x <= num(f.x1, 0) + 0.3);
-      const outside = !isIndoor(room);
-      if (fence) { z = num(fence.z, 0); y = FENCE_H + 0.24; }
-      else y = outside ? 2.5 : H - 0.32;
-      p.cord.visible = !outside;
-      p.pole.visible = outside && !fence;
-      // The post stands from the ground to the lamp; the fence pillar is drawn already.
-      p.pole.scale.y = y - 0.12;
-      p.pole.position.y = -(y + 0.12) / 2;
-      const r = pin.poolRadius || 1.6;
-      p.pool.scale.set(r * 2, r * 2, 1);
-      p.pool.position.y = -y + (outside ? -0.01 : 0.03);
+      ({ x, z, y } = this._lightSpot(info, p, pin, x, z));
     } else if (kind === 'occupancy') {
       y = H - 0.05;
       p.ring.position.y = -y + 0.04;
@@ -958,8 +1082,10 @@ class HouseView {
   /** Where on a floor the pointer is: upper storeys first, and only where
    *  that storey has a room -- unless `floorId` pins the floor (a drag). A
    *  tap that just misses a room (a hair past the fence) lands inside the
-   *  nearest one, up to SNAP metres away. */
-  _floorAt(clientX, clientY, floorId) {
+   *  nearest one, up to SNAP metres away. A drag passes the height of what
+   *  it holds, so a lamp under the ceiling stays under the pointer instead
+   *  of jumping to the spot on the floor below it. */
+  _floorAt(clientX, clientY, floorId, atY) {
     const SNAP = 2;
     const ray = this._ray(clientX, clientY).ray;
     const infos = [...this.floors.values()].filter(i => i.visible && (!floorId || i.floor.id === floorId))
@@ -967,7 +1093,8 @@ class HouseView {
     const out = (info, x, z) => ({ floor: info.floor.id, x: Math.round(x * 100) / 100, z: Math.round(z * 100) / 100 });
     let near = null;
     for (const info of infos) {
-      const hit = ray.intersectPlane(new T.Plane(new T.Vector3(0, 1, 0), -info.base), new T.Vector3());
+      const y = atY === undefined ? info.base : atY;
+      const hit = ray.intersectPlane(new T.Plane(new T.Vector3(0, 1, 0), -y), new T.Vector3());
       if (!hit) continue;
       const x = hit.x - info.ox, z = -hit.z - info.oz;
       if (floorId || innermost(info.rooms, x, z)) return out(info, x, z);
@@ -993,6 +1120,14 @@ class HouseView {
       while (o && !o.userData.pin) o = o.parent;
       if (o && o.visible) { this.cb.onSelect && this.cb.onSelect(o.userData.pin); return; }
     }
+    const lamp = this._lampAt(caster);
+    if (lamp) {
+      // Showing the house, a lamp is its device; arranging or planning, the
+      // lamp itself.
+      if (this.state.mode === 'view' && lamp.data.device) this.cb.onSelect && this.cb.onSelect(lamp.data.device);
+      else this.cb.onLamp && this.cb.onLamp(lamp.data.key);
+      return;
+    }
     if (this.state.mode === 'plan') {
       const room = caster.intersectObjects(this.roomMeshes || [], false)[0];
       if (room && this.cb.onRoom) { this.cb.onRoom(room.object.userData.floor, room.object.userData.room); return; }
@@ -1000,10 +1135,27 @@ class HouseView {
     this.cb.onSelect && this.cb.onSelect(null);
   }
 
+  /** The nearest lamp on show under a ray, by its tap target. */
+  _lampAt(caster) {
+    const groups = [...this.lamps.values()].filter(l => l.group.visible).map(l => l.group);
+    const hit = caster.intersectObjects(groups, true)[0];
+    let o = hit && hit.object;
+    while (o && !o.userData.lamp) o = o.parent;
+    return o ? this.lamps.get(o.userData.lamp) : null;
+  }
+
   _bind() {
     const c = this.canvas;
     this._h_down = (e) => {
       c.setPointerCapture(e.pointerId);
+      // Editing the plan, a lamp under the pointer is picked up, not the view.
+      if (this.state.mode === 'plan' && this._ptrs.size === 0 && e.button === 0 && !this.state.placing) {
+        const lamp = this._lampAt(this._ray(e.clientX, e.clientY));
+        if (lamp) {
+          this._lampDrag = { key: lamp.data.key, sx: e.clientX, sy: e.clientY, moved: false };
+          return;
+        }
+      }
       this._ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this._ptrs.size === 1) {
         this._gesture = { kind: e.button === 2 || e.shiftKey ? 'pan' : 'orbit', x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, moved: false };
@@ -1013,6 +1165,18 @@ class HouseView {
       }
     };
     this._h_move = (e) => {
+      const drag = this._lampDrag;
+      if (drag) {
+        if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 5) return;
+        drag.moved = true;
+        const lamp = this.lamps.get(drag.key);
+        const at = lamp && this._floorAt(e.clientX, e.clientY, lamp.floor, lamp.group.position.y);
+        if (!at) return;
+        lamp.x = at.x; lamp.z = at.z;
+        this._layoutLamp(lamp);
+        this.invalidate();
+        return;
+      }
       if (!this._ptrs.has(e.pointerId)) return;
       this._ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       const g = this._gesture;
@@ -1039,6 +1203,18 @@ class HouseView {
       this._updateCamera();
     };
     this._h_up = (e) => {
+      const drag = this._lampDrag;
+      if (drag) {
+        this._lampDrag = null;
+        const lamp = this.lamps.get(drag.key);
+        if (!lamp || e.type !== 'pointerup') return;
+        if (drag.moved) {
+          this.cb.onLampMove && this.cb.onLampMove(lamp.data.floor, lamp.data.id, Math.round(lamp.x * 100) / 100, Math.round(lamp.z * 100) / 100);
+        } else {
+          this.cb.onLamp && this.cb.onLamp(lamp.data.key);
+        }
+        return;
+      }
       if (!this._ptrs.has(e.pointerId)) return;
       this._ptrs.delete(e.pointerId);
       const g = this._gesture;
@@ -1082,7 +1258,7 @@ class HouseView {
       drag.moved = true;
       drag.el.classList.add('is-dragging');
       const pin = this.pins.get(drag.id);
-      const at = pin && this._floorAt(e.clientX, e.clientY, pin.floor);
+      const at = pin && this._floorAt(e.clientX, e.clientY, pin.floor, pin.group.position.y);
       if (!at) return;
       pin.x = at.x; pin.z = at.z;
       this._layoutPin(pin);

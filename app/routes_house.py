@@ -64,3 +64,20 @@ async def place_device(request: Request, device_id: str, body: dict[str, Any] = 
 async def unplace_device(request: Request, device_id: str) -> None:
     store = _writable(request)
     await _change(request, lambda: store.unplace(device_id))
+
+
+@router.put("/lamps/{key}", status_code=204)
+async def bind_lamp(request: Request, key: str, body: dict[str, Any] = Body(...)) -> None:
+    """Tie a lamp ("<floor>:<lamp>") to the device that switches it, or to
+    nothing ({"device": null}) so it never lights up."""
+    store = _writable(request)
+    if "device" not in body:
+        raise HTTPException(status_code=422, detail="body needs 'device': a device id or null")
+    await _change(request, lambda: store.bind_lamp(key, body["device"]))
+
+
+@router.delete("/lamps/{key}", status_code=204)
+async def unbind_lamp(request: Request, key: str) -> None:
+    """Let the browser guess the lamp's device from its room again."""
+    store = _writable(request)
+    await _change(request, lambda: store.unbind_lamp(key))

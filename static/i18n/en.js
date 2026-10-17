@@ -401,7 +401,6 @@ window.I18N = {
   "แก้ผังห้อง": "Edit floor plan",
   "แตะจุดในบ้านเพื่อวาง {name}": "Tap a spot in the house to place {name}",
   "ลากป้ายเพื่อย้ายอุปกรณ์": "Drag a label to move its device",
-  "แตะห้องในภาพเพื่อแก้ขนาด": "Tap a room in the picture to edit it",
   "มุมมองเริ่มต้น": "Reset view",
   "วางตามห้องอัตโนมัติ": "Place by room automatically",
   "ดูรายละเอียด": "Details",
@@ -434,5 +433,18 @@ window.I18N = {
   "กลับไปใช้ผังตั้งต้น? ผังที่บันทึกไว้จะหายไป ส่วนตำแหน่งอุปกรณ์ยังอยู่": "Go back to the default plan? The saved plan is lost; device positions stay.",
   "ทุกห้องต้องมีชื่อ": "Every room needs a name",
   "กรอกตัวเลขของ \"{name}\" ให้ครบ": "Fill in all the numbers for \"{name}\"",
-  "\"{name}\" ต้องกว้างและลึกอย่างน้อย 0.5 เมตร": "\"{name}\" must be at least 0.5 m wide and deep"
+  "\"{name}\" ต้องกว้างและลึกอย่างน้อย 0.5 เมตร": "\"{name}\" must be at least 0.5 m wide and deep",
+  "หลอดไฟ": "Lamp",
+  "{room} ดวงที่ {n}": "{room}, lamp {n}",
+  "ทำงานตาม {name}": "Switched by {name}",
+  "ยังไม่ได้ผูกกับอุปกรณ์": "Not tied to a device",
+  "อุปกรณ์ที่เปิดปิดหลอดนี้": "Switched by",
+  "ตามชื่อห้อง (อัตโนมัติ)": "By room name (automatic)",
+  "ไม่มี — หลอดนี้ไม่ได้ต่อกับระบบ": "Nothing — this lamp is not connected",
+  "ผูกหลอดไฟไม่สำเร็จ": "Could not save the lamp's device",
+  "ที่หลอดไฟ · {floor}": "On a lamp · {floor}",
+  "เพิ่มหลอดไฟ": "Add a lamp",
+  "ลบหลอดไฟ": "Remove lamp",
+  "กรอกตำแหน่งหลอดไฟให้ครบ": "Fill in every lamp's position",
+  "แตะห้องเพื่อแก้ขนาด ลากหลอดไฟเพื่อย้าย": "Tap a room to edit it, drag a lamp to move it"
 };
