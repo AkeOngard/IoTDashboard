@@ -65,10 +65,11 @@ def default_layout(lang: str) -> dict[str, Any]:
     """The house as the operator described it, sizes guessed: a two-storey
     detached house 8 m wide and 10.5 m deep with a carport in front.
 
-    Ground floor: two living rooms with no wall between them, the kitchen
-    across the back with a bathroom in its corner, stairs at the back of the
-    second living room. Upper floor: a bedroom front and back, and between
-    them a bathroom with a door into each, beside the stair hall.
+    Ground floor: two living rooms one behind the other, the whole width of
+    the house, with no wall between them; the kitchen across the back with a
+    bathroom in its corner; stairs along the back of the second living room.
+    Upper floor: a bedroom front and back, and between them a bathroom with
+    a door into each, beside the stair hall.
     """
     return {
         "floors": [
@@ -78,11 +79,11 @@ def default_layout(lang: str) -> dict[str, Any]:
                 "height": 2.7,
                 "rooms": [
                     {"id": "living1", "name": translate(lang, "ห้องนั่งเล่น 1"), "kind": "living",
-                     "x": 0, "z": 0, "w": 4.2, "d": 6.0},
+                     "x": 0, "z": 0, "w": 8.0, "d": 3.5},
                     {"id": "living2", "name": translate(lang, "ห้องนั่งเล่น 2"), "kind": "living",
-                     "x": 4.2, "z": 0, "w": 3.8, "d": 6.0},
+                     "x": 0, "z": 3.5, "w": 8.0, "d": 3.5},
                     {"id": "kitchen", "name": translate(lang, "ห้องครัว"), "kind": "kitchen",
-                     "x": 0, "z": 6.0, "w": 8.0, "d": 4.5},
+                     "x": 0, "z": 7.0, "w": 8.0, "d": 3.5},
                     {"id": "bath1", "name": translate(lang, "ห้องน้ำชั้นล่าง"), "kind": "bath",
                      "x": 5.9, "z": 8.4, "w": 2.1, "d": 2.1},
                     {"id": "yard", "name": translate(lang, "หน้าบ้าน"), "kind": "yard",
@@ -91,8 +92,11 @@ def default_layout(lang: str) -> dict[str, Any]:
                      "x": 0.3, "z": -6.0, "w": 3.4, "d": 5.6},
                 ],
                 "open": [["living1", "living2"]],
-                "doors": [["living2", "yard"], ["living1", "kitchen"], ["kitchen", "bath1"]],
-                "stairs": [{"x": 4.4, "z": 5.0, "w": 3.4, "d": 1.0, "up": "-x"}],
+                # A door goes in the middle of the wall two rooms share: the
+                # front door just right of the carport, the kitchen door just
+                # beside the foot of the stairs.
+                "doors": [["living1", "yard"], ["living2", "kitchen"], ["kitchen", "bath1"]],
+                "stairs": [{"x": 4.6, "z": 6.0, "w": 3.4, "d": 1.0, "up": "+x"}],
                 "fences": [{"x0": 0, "x1": 8.0, "z": -6.5, "gates": [[0.3, 3.7]]}],
             },
             {
