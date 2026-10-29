@@ -307,15 +307,26 @@ Supabase จริง** ใครที่อยู่กลางทาง (Wi-
 เซ็นรับรองและชื่อตรงเท่านั้น (ทดสอบแล้ว: CA ผิดหรือชื่อเครื่องไม่ตรง แอปไม่ยอมต่อ)
 ถ้ายังใช้ `require` อยู่ แอปจะเตือนใน log ตอนเริ่มและใน `/healthz`
 
-**3) ใส่ใน `ops/pi/.env`** — ต่อท้ายของเดิม:
+**3) เก็บ connection string เป็นไฟล์ secret** — ไม่ใส่ใน `.env` เพราะในนั้นมีรหัสผ่าน database
+ไฟล์ secret อ่านได้เฉพาะแอป และไม่โผล่ใน `docker inspect` (README หัวข้อ "รหัสผ่านเป็นไฟล์ secret"):
 
 ```bash
-cat >> ~/iot-control/IoTDashboard/ops/pi/.env <<'EOF'
-DATABASE_URL=postgresql://postgres.[REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres?sslmode=verify-full&sslrootcert=/run/secrets/db-ca.crt
-# เก็บย้อนหลังกี่วัน — แอปลบเองเป็นรอบ เพราะไม่มี retention policy ของ TimescaleDB
-HISTORY_RETENTION_DAYS=400
-EOF
+cd ~/iot-control/IoTDashboard
+sudo sh scripts/set_secret.sh database_url
 ```
+
+สคริปต์ถามค่าโดยไม่แสดงบนจอ ให้วาง connection string จากข้อ 2 **แต่เปลี่ยนท้ายเป็น `verify-full` + CA**
+แบบนี้ (แก้ `[REF]` `[PASSWORD]` `[REGION]` เป็นของคุณ):
+
+```
+postgresql://postgres.[REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres?sslmode=verify-full&sslrootcert=/run/secrets/db-ca.crt
+```
+
+- เปลี่ยนรหัสผ่านหรือ URL ทีหลัง — รันคำสั่งเดิมซ้ำ มันเขียนทับให้ แล้ว `docker restart iot-app`
+- ถ้าเคยใส่ `DATABASE_URL=...` ไว้ใน `ops/pi/.env` ให้ลบบรรทัดนั้นทิ้ง แอปใช้ค่าจากไฟล์ secret ก่อนอยู่แล้ว
+  แต่ไม่ควรมีรหัสผ่านค้างเป็นตัวหนังสือใน `.env`
+- เก็บประวัติย้อนหลัง: ค่าเริ่มต้น 400 วัน (แอปลบเองเป็นรอบ เพราะไม่มี retention policy ของ TimescaleDB)
+  อยากเปลี่ยนให้ใส่ `HISTORY_RETENTION_DAYS=...` ใน `ops/pi/.env` ได้ เพราะไม่ใช่ความลับ
 
 **4) สร้างตาราง** — ต้อง **build ก่อน** แล้วค่อย migrate
 
@@ -359,7 +370,7 @@ docker compose -f docker-compose.yml -f docker-compose.dashboard.yml up -d
 ราว 5 นาที แปลว่าแอปเขียนได้จริง:
 
 ```bash
-docker exec iot-app sh -c 'psql "$DATABASE_URL" -c "SELECT count(*) AS แถว, max(ts) AS ล่าสุด FROM telemetry"'
+docker exec iot-app sh -c 'psql "${DATABASE_URL:-$(cat /run/secrets/database_url)}" -c "SELECT count(*) AS แถว, max(ts) AS ล่าสุด FROM telemetry"'
 ```
 
 กราฟจะยังว่างอยู่ราวห้านาที — ตัวบันทึกมี deadband และเต้นทุก 5 นาที จึงต้องรอให้มีจุดก่อน
@@ -408,11 +419,11 @@ export ข้อมูลเองเป็นประจำและเก็�
 `scripts/backup.sh` ชี้ไป Supabase ได้ตรง ๆ เพราะมันอ่าน `DATABASE_URL` ที่ตั้งไว้แล้ว
 
 **เช็คเวอร์ชันของเซิร์ฟเวอร์ก่อน** — ตัวเลขนี้ต้องตรงกับ image ที่จะใช้ dump
-(ต้องใช้ `sh -c` เพราะ `DATABASE_URL` อยู่ใน container ไม่ได้อยู่ใน shell ของ Pi —
-ถ้าเขียนตรง ๆ shell จะแทนค่าว่างให้แล้ว psql จะไปลองต่อ socket ในเครื่องแทน):
+(ต้องใช้ `sh -c` เพราะ connection string อยู่ใน container ไม่ได้อยู่ใน shell ของ Pi — อยู่ในไฟล์
+`/run/secrets/database_url` หรือใน `DATABASE_URL` ถ้ายังตั้งแบบเก่า คำสั่งนี้ใช้ได้ทั้งสองแบบ):
 
 ```bash
-docker exec iot-app sh -c 'psql "$DATABASE_URL" -tAc "SHOW server_version"'
+docker exec iot-app sh -c 'psql "${DATABASE_URL:-$(cat /run/secrets/database_url)}" -tAc "SHOW server_version"'
 ```
 
 **สั่งสำรอง** — Raspberry Pi OS ไม่ได้ติดตั้ง `pg_dump` มาให้ และถึงติดตั้งก็ได้เวอร์ชัน 15
@@ -420,22 +431,29 @@ docker exec iot-app sh -c 'psql "$DATABASE_URL" -tAc "SHOW server_version"'
 เปลี่ยน `17` เป็นเลขที่ได้จากคำสั่งข้างบน:
 
 ```bash
-cd ~/iot-control/IoTDashboard && PG_EXEC="docker run --rm -i -v $PWD/ops/pi/secrets/db-ca.crt:/run/secrets/db-ca.crt:ro postgres:17" bash scripts/backup.sh
+cd ~/iot-control/IoTDashboard && sudo env PG_EXEC="docker run --rm -i -v $PWD/ops/pi/secrets/db-ca.crt:/run/secrets/db-ca.crt:ro postgres:17" bash scripts/backup.sh
 ```
 
-(`-v ...db-ca.crt` ส่งใบรับรอง CA เข้าไปให้ `pg_dump` ด้วย เพราะ `DATABASE_URL` ชี้ไปที่ `/run/secrets/db-ca.crt`)
+- `sudo` — สคริปต์ต้องอ่านไฟล์ `ops/pi/secrets/database_url` ซึ่งเป็นของ user ของแอป (uid 10001)
+  (ถ้ายังเก็บ `DATABASE_URL` ใน `ops/pi/.env` แบบเก่า ไม่ต้อง sudo — สคริปต์อ่าน `.env` ก่อน แล้วค่อยไฟล์ secret)
+- `-v ...db-ca.crt` — ส่งใบรับรอง CA เข้าไปให้ `pg_dump` ด้วย เพราะ connection string ชี้ไปที่ `/run/secrets/db-ca.crt`
 
 ได้ไฟล์ใน `ops/backups/iot-<วันเวลา>.dump` และลบไฟล์เก่ากว่า 30 วันให้เอง (ตั้งค่าได้ที่
-`RETENTION_DAYS`) สคริปต์อ่าน `DATABASE_URL` จาก `ops/pi/.env` ให้เอง ไม่ต้องส่งเข้าไป
+`RETENTION_DAYS`) ไม่ต้องส่ง connection string เข้าไปเอง
 
 ถ้าเผลอสั่งโดยไม่มี `PG_EXEC` หรือใช้เวอร์ชันผิด สคริปต์จะหยุดแล้วบอกคำสั่งที่ถูกต้องมาให้ ไม่ปล่อยให้
 ได้ไฟล์ครึ่ง ๆ
 
-**ตั้งให้ทำเองทุกวัน** — ตี 3:
+**ตั้งให้ทำเองทุกวัน** — ตี 3 ใส่ใน crontab ของ **root** เพราะต้องอ่านไฟล์ secret เหมือนข้างบน
+(`D` ถูกแทนเป็นเส้นทางจริงตอนสั่ง เพราะ `$HOME` ของ root ไม่ใช่ของคุณ):
 
 ```bash
-( crontab -l 2>/dev/null; echo "0 3 * * * cd \$HOME/iot-control/IoTDashboard && PG_EXEC='docker run --rm -i postgres:17' bash scripts/backup.sh >> ops/backups/backup.log 2>&1" ) | crontab -
+D=$HOME/iot-control/IoTDashboard
+( sudo crontab -l 2>/dev/null; echo "0 3 * * * cd $D && PG_EXEC='docker run --rm -i -v $D/ops/pi/secrets/db-ca.crt:/run/secrets/db-ca.crt:ro postgres:17' bash scripts/backup.sh >> ops/backups/backup.log 2>&1" ) | sudo crontab -
 ```
+
+ถ้าเคยตั้งแบบเก่าไว้ใน crontab ของตัวเอง ให้ลบออก — มันไม่มี `-v ...db-ca.crt` จึง backup ไม่ผ่านหลังเปลี่ยนเป็น
+`verify-full` และอ่านไฟล์ secret ไม่ได้: `crontab -l | grep -v scripts/backup.sh | crontab -`
 
 ไฟล์อยู่บน SD card ของ Pi ซึ่งก็พังได้เหมือนกัน — **คัดลอกออกไปที่อื่นด้วย** อย่างน้อยเดือนละครั้ง
 เช่น `scp pi:~/iot-control/IoTDashboard/ops/backups/*.dump .` ลงเครื่องคุณ
