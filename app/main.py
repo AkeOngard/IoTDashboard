@@ -18,7 +18,9 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.adapters import build_adapter
 from app.automations import AutomationEngine, AutomationStore
@@ -123,6 +125,62 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 # dashboard.js.
                 response.headers["Cache-Control"] = "no-cache"
         return response
+
+
+#: Largest request body taken, in bytes. Nothing here uploads files: the
+#: biggest body is a house plan, a few tens of KB. The login routes, which
+#: anyone can reach, take far less -- a password.
+MAX_BODY = 1024 * 1024
+MAX_AUTH_BODY = 16 * 1024
+
+
+class BodyLimitMiddleware:
+    """Refuse an oversized request body before it is held in memory.
+
+    FastAPI reads a JSON body whole, then parses it into a second, larger
+    copy: one anonymous 150 MB POST to /api/auth/login took the process to
+    over 500 MB, and the Pi container is capped at 256 -- the kernel kills
+    the dashboard, and whoever sent it can do so again as soon as it is back.
+    The login throttle cannot help: the body is read before any route runs.
+
+    A declared Content-Length over the limit is answered at once, unread. A
+    body without one (chunked) is counted as it arrives and cut off there.
+    Plain ASGI rather than BaseHTTPMiddleware, so nothing is buffered here.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        limit = MAX_AUTH_BODY if scope["path"].startswith("/api/auth/") else MAX_BODY
+        declared = dict(scope["headers"]).get(b"content-length")
+        if declared is not None:
+            try:
+                too_big = int(declared) > limit
+            except ValueError:
+                too_big = True
+            if too_big:
+                response = JSONResponse({"detail": "request body too large"}, status_code=413)
+                await response(scope, receive, send)
+                return
+
+        seen = 0
+
+        async def counted() -> Message:
+            nonlocal seen
+            message = await receive()
+            if message["type"] == "http.request":
+                seen += len(message.get("body", b""))
+                if seen > limit:
+                    # FastAPI passes an HTTPException raised while it reads
+                    # the body straight on to its handler: a 413, not a 400.
+                    raise StarletteHTTPException(status_code=413, detail="request body too large")
+            return message
+
+        await self.app(scope, counted, send)
 
 
 #: Reachable without a session. Everything not on this list needs one.
@@ -282,6 +340,9 @@ async def _migrations(db: Database) -> dict[str, Any]:
 
 app = FastAPI(title="IoT Control Gateway", version="0.3.0", lifespan=lifespan)
 
+# Innermost: whatever reaches a route has passed the size check, and the
+# 413 still carries the security headers added further out.
+app.add_middleware(BodyLimitMiddleware)
 app.add_middleware(RequireLoginMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 # Text shrinks to a quarter or less. Scripts and CSS are compressed once per
