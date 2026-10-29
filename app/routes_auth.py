@@ -11,6 +11,7 @@ from app.auth import (
     DEVICE_COOKIE,
     DEVICE_TTL_SECONDS,
     SESSION_COOKIE,
+    STRANGER_PREFIX,
     AuthError,
     hash_password,
     password_problem,
@@ -22,7 +23,7 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-#: scrypt runs off the event loop -- ~200 ms of CPU on a Pi would otherwise
+#: scrypt runs off the event loop -- about a second of CPU on a Pi would otherwise
 #: freeze every dashboard and WebSocket for each guess -- and at most two at
 #: once, because each one also takes 16 MB and the Pi container has 256.
 _HASH_SLOTS = asyncio.Semaphore(2)
@@ -58,7 +59,7 @@ def _throttle_key(request: Request, store) -> str:
     anywhere would otherwise lock the owner out of their own house.
     """
     device = store.device_id(request.cookies.get(DEVICE_COOKIE))
-    return "device:" + device if device else "ip:" + _client(request)
+    return "device:" + device if device else STRANGER_PREFIX + _client(request)
 
 
 def _check_throttle(request: Request, key: str) -> None:
@@ -147,6 +148,12 @@ async def login(
         raise HTTPException(status_code=401, detail="wrong password")
 
     throttle.clear(key)
+    old = store.outdated_record()
+    if old is not None:
+        # Set under weaker settings than hashing uses now; only a login has
+        # the password in hand to store it again.
+        if store.upgrade_hash(old, await _off_loop(hash_password, password)):
+            log.info("password re-hashed with the current scrypt settings")
     ttl = settings.session_hours * 3600
     token, _ = store.issue(ttl)
     set_session_cookie(request, response, token, int(ttl))

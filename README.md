@@ -267,6 +267,7 @@ make db-upgrade    # ALTER EXTENSION timescaledb UPDATE ในทุก database
 | `SESSION_SECRET` | *(ว่าง)* | เว้นว่าง = สุ่มเก็บไว้ใน `AUTH_PATH` ให้เอง session ข้ามการรีสตาร์ตได้ |
 | `SESSION_HOURS` | `720` | ค้างล็อกอินนานเท่าไร (30 วัน) |
 | `LOGIN_ATTEMPTS` / `LOGIN_WINDOW_MINUTES` | `10` / `15` | จำกัดการเดารหัสต่อ IP |
+| `LOGIN_STRANGER_ATTEMPTS` | `50` | เดารหัสผิดรวมกันทุก IP ได้เท่านี้ต่อรอบ จากเบราว์เซอร์ที่ไม่เคยล็อกอิน (เกินแล้วรอ + เตือนใน log) — เครื่องที่เคยล็อกอินแล้วไม่โดน · `0` = ปิด |
 | `ALLOW_HTTP_COMMISSION` | `0` | เปิด `POST /api/devices/commission` — ปกติใช้ `make commission` |
 | `WS_PING_SECONDS` | `25` | heartbeat กัน Cloudflare ตัด WS |
 | `CF_TUNNEL_TOKEN` | *(ว่าง)* | `make tunnel` |
