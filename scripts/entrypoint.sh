@@ -10,13 +10,16 @@ case "$cmd" in
     exec python scripts/migrate.py up
     ;;
   serve)
+    # --no-server-header: no "server: uvicorn" in every response, which tells
+    # a scanner which software -- and so which known flaws -- to try.
     exec python -m uvicorn app.main:app \
       --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}" \
-      --proxy-headers --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}"
+      --proxy-headers --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}" \
+      --no-server-header
     ;;
   dev)
     exec python -m uvicorn app.main:app \
-      --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}" --reload
+      --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}" --reload --no-server-header
     ;;
   shell)
     exec python

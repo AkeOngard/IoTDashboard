@@ -146,6 +146,9 @@ class Settings(BaseSettings):
     #: lock the owner out of the house.
     login_attempts: int = 10
     login_window_minutes: float = 15.0
+    #: ...and all browsers that never signed in here, together, per window:
+    #: many addresses must not mean many guesses. 0 turns it off.
+    login_stranger_attempts: int = 50
 
     #: Commissioning hands out fabric membership. Behind any proxy or port
     #: mapping every caller looks like a private address, so a "LAN only"

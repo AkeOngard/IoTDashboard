@@ -20,18 +20,22 @@ import logging
 import os
 import secrets
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any
 
 log = logging.getLogger(__name__)
 
-#: scrypt work factor. 16 MB and ~35 ms on a laptop, ~200 ms on a Pi 3B --
-#: slow enough to make guessing expensive, fast enough not to be felt once a
-#: month. Stored with each hash so it can be raised later without invalidating
-#: the password already set.
+#: scrypt work factor. OWASP's floor is N=2^17, r=8, p=1 -- 128 MB a hash,
+#: half of the Pi container's memory. Its cheat sheet lists equally strong
+#: settings that trade memory for passes, and this is the one that fits:
+#: 16 MB like before, five passes, ~200 ms on a laptop and about a second on
+#: a Pi 3B. Felt once a month at login; felt by a guesser on every try.
+#: Stored with each hash, so a password set under weaker settings still
+#: works -- and is re-hashed under these at its next good login.
 SCRYPT_N = 2 ** 14
 SCRYPT_R = 8
-SCRYPT_P = 1
+SCRYPT_P = 5
 DKLEN = 32
 
 SESSION_COOKIE = "iot_session"
@@ -67,6 +71,15 @@ def hash_password(password: str) -> dict[str, Any]:
         "salt": base64.b64encode(salt).decode("ascii"),
         "hash": base64.b64encode(derived).decode("ascii"),
     }
+
+
+def needs_rehash(record: dict[str, Any]) -> bool:
+    """Was this hash made with less work than hashing now takes?"""
+    try:
+        return (int(record["n"]) * int(record["r"]) * int(record["p"])
+                < SCRYPT_N * SCRYPT_R * SCRYPT_P)
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 def verify_password(record: dict[str, Any], password: str) -> bool:
@@ -255,6 +268,24 @@ class AuthStore:
         self._revoked = {}
         self._save()
 
+    def upgrade_hash(self, old: dict[str, Any], new: dict[str, Any]) -> bool:
+        """Swap in a stronger hash of the same password, after a good login.
+
+        Unlike set_password_hash, this signs no one out: the password has not
+        changed, only how it is stored. `old` is the record the login was
+        checked against; if the password changed while the new hash was being
+        made, that change stands and this does nothing.
+        """
+        if self._record is not old:
+            return False
+        self._record = new
+        self._save()
+        return True
+
+    def outdated_record(self) -> dict[str, Any] | None:
+        """The stored hash, when it was made with less work than now."""
+        return self._record if self._record and needs_rehash(self._record) else None
+
     def check_password(self, password: str) -> bool:
         if not self.configured:
             raise AuthError("no password has been set")
@@ -372,12 +403,24 @@ def password_problem(password: str) -> str | None:
 # ---------------------------------------------------------------- throttle
 
 
+#: Throttle keys of browsers that never signed in here, counted by address.
+#: One that has carries a device cookie and is keyed by that instead.
+STRANGER_PREFIX = "ip:"
+
+
 class LoginThrottle:
     """Slow down guessing without letting a stranger lock the owner out.
 
     Per-address, because a global lockout would hand anyone who can reach the
     login page a way to shut the owner out of their own house. Behind Tailscale
     the address is the tailnet peer, which is exactly the granularity wanted.
+
+    Per address alone, though, someone with many addresses -- a botnet behind
+    Cloudflare -- gets ten tries from each. So strangers also share one cap
+    for the whole house: past `stranger_limit` failures in a window, every
+    browser without a device cookie waits. The owner's browsers that have
+    signed in before are not strangers and keep their own count, which is
+    what keeps this from becoming a lockout.
     """
 
     #: Addresses remembered at once. Each failure from a new address adds one,
@@ -386,10 +429,20 @@ class LoginThrottle:
     #: already have by switching address.
     MAX_KEYS = 10_000
 
-    def __init__(self, limit: int = 10, window: float = 900.0) -> None:
+    def __init__(self, limit: int = 10, window: float = 900.0, stranger_limit: int = 50) -> None:
         self.limit = limit
         self.window = window
+        #: 0 turns the shared cap off.
+        self.stranger_limit = stranger_limit
         self._failures: dict[str, list[float]] = {}
+        #: Every stranger's failure in the window, whichever address it came from.
+        self._strangers: deque[float] = deque()
+        self._warned_at = 0.0
+
+    def _recent_strangers(self, now: float) -> deque[float]:
+        while self._strangers and now - self._strangers[0] >= self.window:
+            self._strangers.popleft()
+        return self._strangers
 
     def _recent(self, key: str, now: float) -> list[float]:
         recent = [t for t in self._failures.get(key, []) if now - t < self.window]
@@ -403,9 +456,14 @@ class LoginThrottle:
         """Seconds until this address may try again; 0 when it may try now."""
         now = time.time()
         recent = self._recent(key, now)
-        if len(recent) < self.limit:
-            return 0.0
-        return max(0.0, self.window - (now - recent[0]))
+        wait = 0.0
+        if len(recent) >= self.limit:
+            wait = self.window - (now - recent[0])
+        if self.stranger_limit and key.startswith(STRANGER_PREFIX):
+            shared = self._recent_strangers(now)
+            if len(shared) >= self.stranger_limit:
+                wait = max(wait, self.window - (now - shared[0]))
+        return max(0.0, wait)
 
     def record_failure(self, key: str) -> None:
         now = time.time()
@@ -413,6 +471,18 @@ class LoginThrottle:
             self._prune(now)
         self._failures.setdefault(key, []).append(now)
         self._recent(key, now)
+        if key.startswith(STRANGER_PREFIX):
+            shared = self._recent_strangers(now)
+            shared.append(now)
+            if (self.stranger_limit and len(shared) >= self.stranger_limit
+                    and now - self._warned_at >= self.window):
+                self._warned_at = now
+                addresses = sum(1 for k in self._failures if k.startswith(STRANGER_PREFIX))
+                log.warning(
+                    "%d failed logins from %d addresses in %d minutes -- someone may be "
+                    "guessing the password; browsers that never signed in here wait now",
+                    len(shared), addresses, self.window // 60,
+                )
 
     def _prune(self, now: float) -> None:
         for key in list(self._failures):

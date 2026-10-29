@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import hashlib
 import logging
+import re
 from contextlib import asynccontextmanager
 from datetime import tzinfo
 from typing import Any
@@ -89,21 +90,63 @@ CSP = (
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src 'self' https://fonts.gstatic.com; "
     "img-src 'self' data:; "
-    "connect-src 'self' ws: wss:; "
+    "connect-src {connect}; "
     "object-src 'none'; "
     "frame-ancestors 'none'; "
     "base-uri 'self'; "
     "form-action 'self'"
+)
+#: A host as a browser would have put it in the URL: a name or address and
+#: perhaps a port. Anything else -- a ';' could start a directive of its own
+#: -- is left out of the policy.
+_HOST = re.compile(r"(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?")
+
+
+def csp_for(request: Request) -> str:
+    """The policy, with WebSockets allowed to this dashboard and nowhere else.
+
+    "ws: wss:" -- any host at all -- would let a script that got in send
+    the house's state anywhere. 'self' covers ws:// to the same host in
+    current browsers, but older Safari reads it as http(s) only, so the
+    socket's own URL is named too: the host the browser asked for (Host, or
+    X-Forwarded-Host behind a proxy) and PUBLIC_ORIGIN's.
+    """
+    hosts = [
+        request.headers.get("host", ""),
+        request.headers.get("x-forwarded-host", "").split(",")[0].strip(),
+        *(urlsplit(o).netloc for o in settings.cors_origins),
+    ]
+    allowed = ["'self'"]
+    for host in dict.fromkeys(h.lower() for h in hosts if h and _HOST.fullmatch(h)):
+        allowed += ["ws://" + host, "wss://" + host]
+    return CSP.format(connect=" ".join(allowed))
+
+
+#: Browser features this dashboard never asks for, refused outright: a
+#: script that did get in still could not turn on a camera or microphone,
+#: read the phone's location or motion sensors, or reach USB and serial
+#: devices from the page that controls the house.
+PERMISSIONS_POLICY = ", ".join(
+    feature + "=()"
+    for feature in (
+        "accelerometer", "camera", "display-capture", "geolocation", "gyroscope",
+        "hid", "magnetometer", "microphone", "midi", "payment", "serial", "usb",
+    )
 )
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
-        response.headers.setdefault("Content-Security-Policy", CSP)
+        response.headers.setdefault("Content-Security-Policy", csp_for(request))
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("Permissions-Policy", PERMISSIONS_POLICY)
+        # A window this page opens, or that opened it, gets no handle on it.
+        response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+        # No other site may load this one's responses into its own page.
+        response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
         if request.url.scheme == "https":
             response.headers.setdefault(
                 "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
@@ -269,7 +312,8 @@ async def lifespan(app: FastAPI):
             ", ".join(settings.trusted_hosts),
         )
     app.state.login_throttle = LoginThrottle(
-        limit=settings.login_attempts, window=settings.login_window_minutes * 60
+        limit=settings.login_attempts, window=settings.login_window_minutes * 60,
+        stranger_limit=settings.login_stranger_attempts,
     )
 
     adapter = build_adapter(settings.iot_adapter)
@@ -378,6 +422,8 @@ async def healthz(request: Request) -> dict[str, Any]:
     snapshot = hub.snapshot()
 
     database: dict[str, Any] = {"enabled": db.enabled, "connected": db.available}
+    if db.tls_problem:
+        database["tls_warning"] = db.tls_problem
     if db.enabled and not db.available:
         database["error"] = db.last_error
     database["migrations"] = app.state.migrations

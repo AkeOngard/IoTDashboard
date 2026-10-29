@@ -293,11 +293,25 @@ postgresql://postgres.[REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/p
 
 ถ้ารหัสผ่านมีอักขระพิเศษ (`@ : / ? # &`) ต้อง URL-encode ก่อน ไม่งั้น DSN จะถูกตีความผิด
 
+**เอาใบรับรอง CA ของ Supabase มาด้วย** — หน้าเดียวกัน (Database Settings → SSL Configuration →
+**Download certificate**) ได้ไฟล์ `prod-ca-2021.crt` แล้ววางไว้ให้ container อ่านได้:
+
+```bash
+cd ~/iot-control/IoTDashboard/ops/pi
+sudo install -D -o 10001 -g 10001 -m 444 ~/Downloads/prod-ca-2021.crt secrets/db-ca.crt
+```
+
+ทำไมต้องมี: connection string ที่ Supabase ให้มาลงท้าย `sslmode=require` ซึ่ง**เข้ารหัสแต่ไม่ตรวจว่าปลายทางคือ
+Supabase จริง** ใครที่อยู่กลางทาง (Wi-Fi สาธารณะ, router ที่โดนเจาะ, DNS ปลอม) ยื่นใบรับรองของตัวเองมาก็ต่อติด
+ได้รหัสผ่าน database กับข้อมูลทุกแถว `verify-full` + CA ข้างบนทำให้แอปยอมต่อเฉพาะเซิร์ฟเวอร์ที่ Supabase
+เซ็นรับรองและชื่อตรงเท่านั้น (ทดสอบแล้ว: CA ผิดหรือชื่อเครื่องไม่ตรง แอปไม่ยอมต่อ)
+ถ้ายังใช้ `require` อยู่ แอปจะเตือนใน log ตอนเริ่มและใน `/healthz`
+
 **3) ใส่ใน `ops/pi/.env`** — ต่อท้ายของเดิม:
 
 ```bash
 cat >> ~/iot-control/IoTDashboard/ops/pi/.env <<'EOF'
-DATABASE_URL=postgresql://postgres.[REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres?sslmode=require
+DATABASE_URL=postgresql://postgres.[REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres?sslmode=verify-full&sslrootcert=/run/secrets/db-ca.crt
 # เก็บย้อนหลังกี่วัน — แอปลบเองเป็นรอบ เพราะไม่มี retention policy ของ TimescaleDB
 HISTORY_RETENTION_DAYS=400
 EOF
@@ -406,8 +420,10 @@ docker exec iot-app sh -c 'psql "$DATABASE_URL" -tAc "SHOW server_version"'
 เปลี่ยน `17` เป็นเลขที่ได้จากคำสั่งข้างบน:
 
 ```bash
-cd ~/iot-control/IoTDashboard && PG_EXEC="docker run --rm -i postgres:17" bash scripts/backup.sh
+cd ~/iot-control/IoTDashboard && PG_EXEC="docker run --rm -i -v $PWD/ops/pi/secrets/db-ca.crt:/run/secrets/db-ca.crt:ro postgres:17" bash scripts/backup.sh
 ```
+
+(`-v ...db-ca.crt` ส่งใบรับรอง CA เข้าไปให้ `pg_dump` ด้วย เพราะ `DATABASE_URL` ชี้ไปที่ `/run/secrets/db-ca.crt`)
 
 ได้ไฟล์ใน `ops/backups/iot-<วันเวลา>.dump` และลบไฟล์เก่ากว่า 30 วันให้เอง (ตั้งค่าได้ที่
 `RETENTION_DAYS`) สคริปต์อ่าน `DATABASE_URL` จาก `ops/pi/.env` ให้เอง ไม่ต้องส่งเข้าไป

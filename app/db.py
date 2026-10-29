@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 import logging
+import os
 import re
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import asyncpg
 
@@ -23,6 +25,14 @@ log = logging.getLogger(__name__)
 #: `prepared statement "asyncpg_stmt_N" does not exist`. Setting the cache to
 #: zero makes asyncpg use unnamed statements, which the pooler allows.
 POOLED_PORTS = {6543}
+
+#: sslmode values under which asyncpg checks the server's certificate.
+#: "require" -- what a provider's connection string usually says -- only
+#: encrypts: anyone on the path can present a certificate of their own,
+#: read the password and every reading, and answer in the database's place.
+VERIFYING_MODES = {"verify-full", "verify-ca"}
+#: Host names that never leave this machine, the compose network or the LAN.
+LOCAL_SUFFIXES = (".local", ".lan", ".internal", ".home.arpa", ".ts.net")
 
 CAPABILITY_SQL = """
 SELECT (SELECT extversion FROM pg_extension WHERE extname = 'timescaledb') AS timescale,
@@ -47,6 +57,8 @@ class Database:
         self.probed = False
         self._task: asyncio.Task | None = None
         self._closing = False
+        #: Why the connection could be read or faked on its way, or None.
+        self.tls_problem = tls_problem(dsn) if dsn else None
 
     @property
     def enabled(self) -> bool:
@@ -61,6 +73,8 @@ class Database:
             log.info("DATABASE_URL is empty; running live-only (no history)")
             return
         self._closing = False
+        if self.tls_problem:
+            log.warning("database connection is not verified: %s", self.tls_problem)
         # One synchronous attempt so a healthy start-up is fully ready before
         # the first request, then hand off to the background reconnect loop.
         await self._try_connect()
@@ -166,6 +180,44 @@ class Database:
             raise ConnectionError(self.last_error or "database is not connected")
         async with self.pool.acquire() as conn:
             await conn.executemany(query, rows)
+
+
+def tls_problem(dsn: str) -> str | None:
+    """Why the link to this database could be read or impersonated by
+    someone on the network between, or None when it cannot.
+
+    Only a database across the internet is judged: one on this machine, the
+    compose network, the LAN or the tailnet (WireGuard already encrypts and
+    authenticates that) is fine without TLS. A keyword DSN is left alone.
+    """
+    try:
+        parts = urlsplit(dsn)
+        host = (parts.hostname or "").lower()
+    except ValueError:
+        return None
+    if parts.scheme not in ("postgres", "postgresql") or _is_local(host):
+        return None
+    modes = parse_qs(parts.query).get("sslmode")
+    mode = (modes[-1] if modes else os.environ.get("PGSSLMODE", "prefer")).lower()
+    if mode in VERIFYING_MODES:
+        return None
+    return (
+        "%s is reached with sslmode=%s, which does not check the server's certificate; "
+        "add sslmode=verify-full&sslrootcert=<the provider's CA file> to DATABASE_URL "
+        "(DEPLOY-CLOUD.md)" % (host, mode)
+    )
+
+
+def _is_local(host: str) -> bool:
+    if not host or host.startswith("/") or host == "localhost":
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        # "db", "postgres": a compose service or a machine on the LAN.
+        return "." not in host or host.endswith(LOCAL_SUFFIXES)
+    return (address.is_private or address.is_loopback or address.is_link_local
+            or address in ipaddress.ip_network("100.64.0.0/10"))     # tailnet
 
 
 def _dsn_port(dsn: str) -> int | None:
