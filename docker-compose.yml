@@ -12,7 +12,8 @@ x-db-url: &db-url
 
 services:
   db:
-    image: timescale/timescaledb:2.17.2-pg16
+    # Pinned by digest: the tag can be pushed again with different bytes.
+    image: timescale/timescaledb:2.17.2-pg16@sha256:4e459e217f00cbb09920c34d245501e63427e6767a495de57ce76823ff280f12
     container_name: iot-db
     restart: unless-stopped
     environment:
@@ -87,7 +88,11 @@ services:
   # optional, and why Docker Desktop on Windows/macOS cannot host this service.
   # Doc §11: :5580 has no authentication, so it must never be exposed.
   matter-server:
-    image: ghcr.io/home-assistant-libs/python-matter-server:stable
+    # Pinned by digest -- the bytes, not a tag that can be moved. 8.1.0 is
+    # what "stable" pointed at when pinned. Upgrading: pick the new release,
+    # `docker buildx imagetools inspect <image>:<version>` for its digest,
+    # and back up the Matter data first; never step back to an older one.
+    image: ghcr.io/home-assistant-libs/python-matter-server:8.1.0@sha256:170aa093ce91c76cde4cc390918307590f0f5558fcec93f913af3cb019e6562a
     container_name: iot-matter-server
     # Opt-in: set COMPOSE_PROFILES=matter in .env on a box that sits on the
     # same LAN as the hub (all-in-one Pi 4/5). The cloud deployment leaves it
@@ -108,7 +113,8 @@ services:
     # are not already on the IP network. The M1 is, so we do not.
 
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    # Pinned by digest, like every image here; "latest" was 2026.10.5 then.
+    image: cloudflare/cloudflared:2026.10.5@sha256:1b1d34d0a9c0bfca9de72db8460d328db3f19edd2b96169114e3e893a97bbe53
     container_name: iot-tunnel
     restart: unless-stopped
     profiles: ["tunnel"]

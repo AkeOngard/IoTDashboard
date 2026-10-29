@@ -9,7 +9,7 @@ PY           := python
 .DEFAULT_GOAL := help
 .PHONY: help init up down restart logs ps build dev \
         prod-up prod-deploy prod-logs migrate migrate-status migrate-verify migrate-new \
-        health ready commission matter-nodes backup restore tunnel css clean
+        health ready commission matter-nodes backup restore tunnel css lock audit clean
 
 help: ## show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -101,6 +101,18 @@ prod-deploy: ## rolling update with the prod overlay
 	$(COMPOSE_PROD) run --rm migrate
 	$(COMPOSE_PROD) up -d --no-deps app
 	@$(MAKE) --no-print-directory health
+
+lock: ## re-pin requirements.txt (versions + hashes) from requirements.in
+	$(PY) -m pip install --quiet uv
+	$(PY) -m uv pip compile requirements.in --universal --python-version 3.12 \
+	  --generate-hashes --upgrade --no-header --quiet -o .requirements.lock
+	{ sed -n '1,/^$$/p' requirements.txt; cat .requirements.lock; } > requirements.txt.new
+	mv requirements.txt.new requirements.txt && rm -f .requirements.lock
+	@echo "requirements.txt re-pinned; review the diff, run make audit, rebuild"
+
+audit: ## check the pinned Python packages against known vulnerabilities
+	$(PY) -m pip install --quiet pip-audit
+	$(PY) -m pip_audit --require-hashes --disable-pip -r requirements.txt
 
 css: ## rebuild static/tailwind.css after changing classes (needs Node)
 	npx --yes tailwindcss@3.4.19 -c tailwind/tailwind.config.js -i tailwind/input.css -o static/tailwind.css --minify
