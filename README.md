@@ -207,6 +207,27 @@ docker restart iot-app
 - ข้อจำกัด: ใครเป็น root บน Pi ก็ยังอ่านได้ — แอปต้องส่งรหัสตัวจริงให้ Toshiba ทุกครั้งที่ล็อกอิน
   จึงเข้ารหัสแบบที่ถอดได้เฉพาะแอปไม่ได้ (กุญแจก็ต้องอยู่บนเครื่องเดียวกัน) ช่องว่างหน้า/หลังค่าจะถูกตัดทิ้ง
 
+## Dependency และ image ถูกล็อกเวอร์ชัน
+
+ทุกอย่างที่ติดตั้งลง Pi ถูกล็อกไว้ ไม่มีอะไรอัปเดตเองตอน build:
+
+- **Python** — `requirements.in` คือรายการที่เขียนเอง ส่วน `requirements.txt` สร้างจากมันด้วย `make lock`
+  ล็อกทุกแพ็กเกจ (รวมที่ติดมาด้วย) พร้อม hash ของไฟล์บน PyPI ตอน build ใช้ `--require-hashes`
+  ไฟล์ไหน hash ไม่ตรงหรือไม่มีในรายการ pip จะไม่ยอมติดตั้ง
+- **Docker image** — ทุกตัวระบุด้วย digest (`@sha256:…`) ไม่ใช่แค่ tag (`latest`, `stable` ถูกเปลี่ยนเป็นเวอร์ชันจริง)
+  tag ถูกชี้ไปที่ของใหม่ได้ digest ทำไม่ได้
+
+อัปเดต (ควรทำทุกเดือนหรือเมื่อมีข่าวช่องโหว่):
+
+```bash
+make lock      # ดึงเวอร์ชันใหม่ล่าสุดตาม requirements.in แล้วล็อกใหม่
+make audit     # เช็ก CVE ของทุกแพ็กเกจที่ล็อกไว้
+git diff requirements.txt                          # ดูว่าอะไรเปลี่ยน
+docker buildx imagetools inspect python:3.12-slim  # digest ใหม่ของ image (แก้ใน Dockerfile / compose)
+```
+
+matter-server อย่าย้อนเวอร์ชันลง (ข้อมูล fabric อาจอ่านไม่ได้) และ backup `matter-data` ก่อนอัปทุกครั้ง
+
 ## Config (`.env`)
 
 | ตัวแปร | ค่าเริ่มต้น | ความหมาย |

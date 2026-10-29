@@ -14,7 +14,11 @@
 #   'Failed to advertise records ... Network is unreachable'.
 services:
   matter-server:
-    image: ghcr.io/home-assistant-libs/python-matter-server:stable
+    # Pinned by digest -- the bytes, not a tag that can be moved. 8.1.0 is
+    # what "stable" pointed at when pinned. Upgrading: pick the new release,
+    # `docker buildx imagetools inspect <image>:<version>` for its digest,
+    # and back up the Matter data first; never step back to an older one.
+    image: ghcr.io/home-assistant-libs/python-matter-server:8.1.0@sha256:170aa093ce91c76cde4cc390918307590f0f5558fcec93f913af3cb019e6562a
     container_name: matter-server
     restart: unless-stopped
     # Matter needs IPv6 link-local + mDNS on the real LAN interface.

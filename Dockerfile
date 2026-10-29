@@ -1,17 +1,24 @@
 # Multi-stage build (doc §12): wheels are built once, the runtime image carries
 # no compiler and runs as a non-root user.
-FROM python:3.12-slim AS builder
+#
+# Both stages name the base image by digest as well as tag: a tag can be
+# repointed at different bytes, a digest cannot. To move to a newer Python
+# or Debian patch, look the digest up (`docker buildx imagetools inspect
+# python:3.12-slim`) and change both lines.
+FROM python:3.12.16-slim-trixie@sha256:8523d6abeb48ceae0b7240d30c5808fc26cb79c1a635bacdf19cf3baecfbec07 AS builder
 
 WORKDIR /build
 RUN apt-get update \
  && apt-get install -y --no-install-recommends build-essential \
  && rm -rf /var/lib/apt/lists/*
 
+# requirements.txt pins every package and lists its hashes (make lock);
+# --require-hashes makes pip refuse anything that does not match them.
 COPY requirements.txt .
-RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
+RUN pip wheel --no-cache-dir --require-hashes --wheel-dir /wheels -r requirements.txt
 
 
-FROM python:3.12-slim AS runtime
+FROM python:3.12.16-slim-trixie@sha256:8523d6abeb48ceae0b7240d30c5808fc26cb79c1a635bacdf19cf3baecfbec07 AS runtime
 
 # postgresql-client gives us `make backup` and `entrypoint.sh psql` in-container.
 RUN apt-get update \
@@ -22,8 +29,9 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY --from=builder /wheels /wheels
-COPY requirements.txt .
-RUN pip install --no-cache-dir --no-index --find-links=/wheels -r requirements.txt \
+# Exactly the wheels the builder checked, nothing fetched: the lock is
+# complete, so --no-deps leaves no gap for pip to fill on its own.
+RUN pip install --no-cache-dir --no-index --no-deps /wheels/*.whl \
  && rm -rf /wheels
 
 COPY app        ./app

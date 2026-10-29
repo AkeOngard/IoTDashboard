@@ -196,6 +196,11 @@ EOF
 
 compose จะไม่ยอม start ถ้าไม่มี `ALLOWED_HOSTS` — ตั้งใจให้เป็นแบบนั้น
 
+แบบนี้ matter-server ฟังแค่ `127.0.0.1:5580` (`docker-compose.dashboard.yml` ใส่ `--listen-address 127.0.0.1` ให้)
+เพราะ dashboard อยู่เครื่องเดียวกัน — matter-server ไม่มีรหัสผ่าน ถ้าฟังทุก IP ใครต่อ Wi-Fi บ้านได้ก็สั่งอุปกรณ์ได้โดยไม่ต้องล็อกอิน
+เช็กด้วย `sudo ss -tlnp | grep 5580` ต้องเห็น `127.0.0.1:5580` ไม่ใช่ `0.0.0.0` หรือ `*`
+(ถ้าจะกลับไปใช้ dashboard บน cloud ที่ต่อมาทาง Tailscale ให้รันแค่ `docker-compose.yml` ตามข้อ 2.3–2.4 ซึ่งยังฟังทุก IP และใช้ iptables กันไว้)
+
 **Build และเปิด**:
 
 ```bash

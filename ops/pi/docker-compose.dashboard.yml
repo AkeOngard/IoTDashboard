@@ -16,8 +16,8 @@ services:
     image: iot-control-app
     container_name: iot-app
     restart: unless-stopped
-    # Host networking: matter-server is on 127.0.0.1:5580 (allowed through the
-    # firewall rule on `lo`), and the dashboard lands on the Pi's port 8000.
+    # Host networking: matter-server is on 127.0.0.1:5580 (bound there alone,
+    # below), and the dashboard lands on the Pi's port 8000.
     network_mode: host
     environment:
       # "matter,toshiba" adds air conditioners on Toshiba's cloud (Carrier
@@ -46,9 +46,9 @@ services:
       TELEMETRY_FLUSH_SECONDS: ${TELEMETRY_FLUSH_SECONDS:-15}
       HOST: ${HOST:-0.0.0.0}
       PORT: ${PORT:-8000}
-      # No login exists yet (phase 4), so the Host check is what stops a web
-      # page you visit from driving the dashboard via DNS rebinding. Required:
-      # list the tailnet name and the Pi's LAN address, e.g.
+      # The Host check is what stops a web page you visit from reaching the
+      # dashboard through DNS rebinding, login or not. Required: list the
+      # tailnet name and the Pi's LAN address, e.g.
       #   ALLOWED_HOSTS=iot-pi.tail1a2b3c.ts.net,192.168.1.50
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:?set ALLOWED_HOSTS in ops/pi/.env (see comment in docker-compose.dashboard.yml)}
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8000}
@@ -76,6 +76,20 @@ services:
         max-file: "3"
     depends_on:
       - matter-server
+
+  # The dashboard is on this same Pi, so matter-server need answer no one
+  # else. It has no authentication of its own: listening on every address --
+  # its default -- lets anything on the Wi-Fi (a guest's phone, a camera
+  # that got owned) switch and remove every Matter device, login or not.
+  # Replaces the command in docker-compose.yml, which stays reachable for the
+  # cloud set-up that talks to it over Tailscale; keep the two in step.
+  matter-server:
+    command: >
+      --storage-path /data
+      --paa-root-cert-dir /data/credentials
+      --primary-interface ${MATTER_PRIMARY_IFACE:-eth0}
+      --listen-address 127.0.0.1
+      --log-level info
 
 volumes:
   app-data:
