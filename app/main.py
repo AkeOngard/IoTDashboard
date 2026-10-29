@@ -97,6 +97,19 @@ CSP = (
 )
 
 
+#: Browser features this dashboard never asks for, refused outright: a
+#: script that did get in still could not turn on a camera or microphone,
+#: read the phone's location or motion sensors, or reach USB and serial
+#: devices from the page that controls the house.
+PERMISSIONS_POLICY = ", ".join(
+    feature + "=()"
+    for feature in (
+        "accelerometer", "camera", "display-capture", "geolocation", "gyroscope",
+        "hid", "magnetometer", "microphone", "midi", "payment", "serial", "usb",
+    )
+)
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -104,6 +117,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("Permissions-Policy", PERMISSIONS_POLICY)
+        # A window this page opens, or that opened it, gets no handle on it.
+        response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+        # No other site may load this one's responses into its own page.
+        response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
         if request.url.scheme == "https":
             response.headers.setdefault(
                 "Strict-Transport-Security", "max-age=31536000; includeSubDomains"

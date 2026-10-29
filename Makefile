@@ -8,7 +8,7 @@ PY           := python
 
 .DEFAULT_GOAL := help
 .PHONY: help init up down restart logs ps build dev \
-        prod-up prod-deploy prod-logs migrate migrate-status migrate-verify migrate-new \
+        prod-up prod-deploy prod-logs migrate migrate-status migrate-verify migrate-new db-upgrade \
         health ready commission matter-nodes backup restore tunnel css lock audit clean
 
 help: ## show this help
@@ -57,6 +57,9 @@ migrate-status: ## show applied / pending migrations
 
 migrate-verify: ## checksum-verify applied migrations
 	$(PY) scripts/migrate.py verify
+
+db-upgrade: ## after a new TimescaleDB image: update the extension in every database
+	$(COMPOSE) exec -T db sh < scripts/timescale_update.sh
 
 migrate-new: ## scaffold a migration: make migrate-new name=add_scenes
 	$(PY) scripts/migrate.py new $(name)

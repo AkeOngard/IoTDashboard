@@ -228,6 +228,14 @@ docker buildx imagetools inspect python:3.12-slim  # digest ใหม่ขอ�
 
 matter-server อย่าย้อนเวอร์ชันลง (ข้อมูล fabric อาจอ่านไม่ได้) และ backup `matter-data` ก่อนอัปทุกครั้ง
 
+TimescaleDB อยู่บน `-pg16` เสมอ (ขึ้น PostgreSQL major ใหม่ต้องใช้ `pg_upgrade` ซึ่งเป็นงานแยก)
+พอเปลี่ยน image แล้ว `make prod-up` ฐานข้อมูลเดิมยังใช้ได้ทันที แต่ต้องสั่งอัป extension ให้เป็นตัวใหม่ด้วย:
+
+```bash
+make backup        # กันไว้ก่อน
+make db-upgrade    # ALTER EXTENSION timescaledb UPDATE ในทุก database (รันซ้ำได้)
+```
+
 ## Config (`.env`)
 
 | ตัวแปร | ค่าเริ่มต้น | ความหมาย |
